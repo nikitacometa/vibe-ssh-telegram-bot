@@ -1,0 +1,28 @@
+version: '3.8'
+
+services:
+  mcp-telegram-bot:
+    build: .
+    container_name: mcp-telegram-bot
+    restart: unless-stopped
+    env_file:
+      - .env
+    volumes:
+      - ./config:/usr/src/app/config
+      - ./logs:/usr/src/app/logs
+    networks:
+      - mcp-network
+    healthcheck:
+      test: ["CMD", "node", "-e", "process.exit(0)"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+
+networks:
+  mcp-network:
+    driver: bridge
+
+volumes:
+  config:
+  logs:
