@@ -235,8 +235,6 @@ export class VibeSSHBot {
   }
 
   private async handleVoiceMessage(chatId: number, userId: number, voice: Voice, messageId?: number) {
-    const session = this.sessions.getOrCreateSession(userId);
-    
     // Send initial processing message
     const processingMsg = await this.bot.sendMessage(
       chatId,
@@ -592,34 +590,37 @@ export class VibeSSHBot {
         await this.handleShowHistory(chatId, userId);
         break;
 
-      case data.startsWith('connect_'):
+      case data.startsWith('connect_'): {
         const serverId = data.replace('connect_', '');
         await this.connectToServer(chatId, userId, serverId);
         break;
+      }
         
       case data === 'view_servers':
         await this.handleListServers(chatId);
         break;
         
-      case data === 'quick_connect':
+      case data === 'quick_connect': {
         const defaultServer = this.servers.find(s => s.id === 'default-ssh');
         if (defaultServer) {
           await this.connectToServer(chatId, userId, defaultServer.id);
         }
         break;
-        
+      }
+
       case data === 'add_server':
         await this.handleAddServer(chatId, userId);
         break;
-        
+
       case data === 'refresh_servers':
         await this.handleListServers(chatId);
         break;
-        
-      case data.startsWith('status_'):
+
+      case data.startsWith('status_'): {
         const statusServerId = data.replace('status_', '');
         await this.handleServerStatus(chatId, statusServerId);
         break;
+      }
 
       case data.startsWith('disconnect_'):
         await this.handleDisconnectServer(chatId, userId, data.replace('disconnect_', ''));
@@ -864,7 +865,9 @@ export class VibeSSHBot {
             parse_mode: 'Markdown'
           }
         );
-      } catch (e) {}
+      } catch {
+        // Editing the loading animation can race message deletion; harmless.
+      }
     }, 200);
 
     try {
@@ -1025,6 +1028,7 @@ export class VibeSSHBot {
             );
           }
         } catch (error) {
+          logger.warn('Auto-connect to default server failed:', error);
           await this.bot.sendMessage(
             chatId,
             '🍃 _couldn\'t connect... servers need their space sometimes_',
@@ -1159,7 +1163,9 @@ export class VibeSSHBot {
               parse_mode: 'Markdown'
             }
           );
-        } catch (e) {}
+        } catch {
+          // Progress-bar edits can race the connection result; harmless.
+        }
       }
     }, 300);
 
@@ -1572,17 +1578,17 @@ export class VibeSSHBot {
     const setup = session.serverSetup!;
 
     switch (setup.step) {
-      case 'hostname':
+      case 'hostname': {
         const hostname = text.trim();
         if (!hostname) {
           await this.bot.sendMessage(chatId, '❌ Please enter a valid hostname or IP address.');
           return;
         }
-        
+
         // Basic validation for hostname/IP
         const ipPattern = /^(\d{1,3}\.){3}\d{1,3}$/;
         const hostnamePattern = /^[a-zA-Z0-9][a-zA-Z0-9-._]*[a-zA-Z0-9]$/;
-        
+
         if (!ipPattern.test(hostname) && !hostnamePattern.test(hostname)) {
           await this.bot.sendMessage(
             chatId, 
@@ -1612,8 +1618,9 @@ export class VibeSSHBot {
           }
         );
         break;
-        
-      case 'name':
+      }
+
+      case 'name': {
         const serverName = text.trim();
         if (!serverName) {
           await this.bot.sendMessage(chatId, '❌ Please enter a valid name for the server.');
@@ -1637,7 +1644,8 @@ export class VibeSSHBot {
           }
         );
         break;
-        
+      }
+
       case 'port':
         // Handle empty input as default port 22
         if (!text.trim() || text.trim().toLowerCase() === 'enter') {
@@ -1922,7 +1930,8 @@ export class VibeSSHBot {
           logger.error(`Failed to stop command "${activeCmd.command}":`, error);
         }
       }
-      ok ? stopped++ : failed++;
+      if (ok) stopped++;
+      else failed++;
 
       try {
         await this.bot.editMessageText(
