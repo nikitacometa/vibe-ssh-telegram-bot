@@ -1,4 +1,8 @@
-import TelegramBot from 'node-telegram-bot-api';
+import TelegramBot, { InlineKeyboardMarkup } from 'node-telegram-bot-api';
+import { ServerConfig } from './types';
+
+/** Options accepted by TelegramBot.sendMessage (derived so it tracks the library version). */
+type SendMessageOptions = Parameters<TelegramBot['sendMessage']>[2];
 
 export class UIHelpers {
   getRandomEmoji(): string {
@@ -14,7 +18,7 @@ export class UIHelpers {
     return '🌃 Working late?';
   }
 
-  async sendWithTyping(bot: TelegramBot, chatId: number, message: string, options?: any) {
+  async sendWithTyping(bot: TelegramBot, chatId: number, message: string, options?: SendMessageOptions) {
     // Send typing indicator
     await bot.sendChatAction(chatId, 'typing');
     
@@ -129,7 +133,11 @@ export class UIHelpers {
     return messages[Math.floor(Math.random() * messages.length)];
   }
 
-  getErrorMessage(error: any): string {
+  getErrorMessage(error: unknown): string {
+    const errorString = String(error);
+    const errorDetail =
+      error instanceof Error ? error.message : errorString;
+
     const errorMessages: { [key: string]: string } = {
       'ECONNREFUSED': '🔌 Oops! Connection refused. Is the server taking a nap? 😴',
       'ETIMEDOUT': '⏱️ Connection timed out... The server is playing hard to get! 🙈',
@@ -143,57 +151,56 @@ export class UIHelpers {
       'Command not found': '🤷 Command not found. Did you make a typo? We all do! 😊'
     };
 
-    const errorString = error.toString();
-    
     for (const [key, message] of Object.entries(errorMessages)) {
       if (errorString.includes(key)) {
         return message;
       }
     }
-    
+
     // Fallback with random funny messages
     const fallbacks = [
-      `❌ Whoopsie! ${error.message || errorString}`,
-      `💥 Houston, we have a problem: ${error.message || errorString}`,
-      `🙊 Oh snap! ${error.message || errorString}`,
-      `🤖 Error detected, captain: ${error.message || errorString}`,
-      `🎪 The circus encountered: ${error.message || errorString}`
+      `❌ Whoopsie! ${errorDetail}`,
+      `💥 Houston, we have a problem: ${errorDetail}`,
+      `🙊 Oh snap! ${errorDetail}`,
+      `🤖 Error detected, captain: ${errorDetail}`,
+      `🎪 The circus encountered: ${errorDetail}`
     ];
-    
+
     return fallbacks[Math.floor(Math.random() * fallbacks.length)];
   }
 
-  createQuickCommands(): any {
+  createQuickCommands(): SendMessageOptions {
+    const rows = [
+      ['📁 Show Files', '💾 Check Space'],
+      ['🖥️ System Stats', '🏃‍♂️ What\'s Running?'],
+      ['🌍 Network Check', '🧠 Memory Info'],
+      ['⚙️ Settings', '🆘 Need Help?'],
+      ['👋 Bye Server']
+    ];
     return {
       reply_markup: {
-        keyboard: [
-          ['📁 Show Files', '💾 Check Space'],
-          ['🖥️ System Stats', '🏃‍♂️ What\'s Running?'],
-          ['🌍 Network Check', '🧠 Memory Info'],
-          ['⚙️ Settings', '🆘 Need Help?'],
-          ['👋 Bye Server']
-        ],
+        keyboard: rows.map(row => row.map(text => ({ text }))),
         resize_keyboard: true,
         one_time_keyboard: false
       }
     };
   }
 
-  createServerKeyboard(servers: Array<{id: string, name: string, connected: boolean}>): any {
+  createServerKeyboard(servers: Array<{id: string, name: string, connected: boolean}>): InlineKeyboardMarkup {
     const keyboard = servers.map(server => [{
       text: `${server.connected ? '🟢' : '⚪'} ${server.name}`,
       callback_data: server.connected ? `status_${server.id}` : `connect_${server.id}`
     }]);
-    
+
     keyboard.push([
       { text: '➕ Add New Server', callback_data: 'add_server' },
       { text: '🔄 Refresh', callback_data: 'refresh_servers' }
     ]);
-    
+
     return { inline_keyboard: keyboard };
   }
 
-  formatServerInfo(server: any, isConnected: boolean): string {
+  formatServerInfo(server: ServerConfig, isConnected: boolean): string {
     const statusEmoji = isConnected ? '🟢' : '⚪';
     const statusText = isConnected ? 'Online & Ready!' : 'Sleeping...';
     const serverEmojis = ['🖥️', '💻', '🖲️', '⚡', '🔧'];

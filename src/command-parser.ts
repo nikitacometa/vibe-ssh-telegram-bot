@@ -1,4 +1,5 @@
 import { AICommandAnalyzer } from './ai-command-analyzer';
+import { logger } from './logger';
 
 export interface ParsedCommand {
   type: 'bash' | 'system' | 'unknown';
@@ -98,7 +99,7 @@ export class CommandParser {
           };
         }
       } catch (error) {
-        console.warn('AI analysis failed, falling back to pattern matching:', error);
+        logger.warn('AI analysis failed, falling back to pattern matching:', error);
       }
     }
 

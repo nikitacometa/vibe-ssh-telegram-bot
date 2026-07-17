@@ -1,4 +1,4 @@
-import TelegramBot from 'node-telegram-bot-api';
+import TelegramBot, { Voice, Document } from 'node-telegram-bot-api';
 import { config, loadServers, saveServers } from './config';
 import { SimpleSSHClient } from './ssh-client';
 import { CommandParser } from './command-parser';
@@ -46,7 +46,7 @@ export class VibeSSHBot {
     // Set up message handlers
     this.setupHandlers();
     
-    console.log('Bot is running!');
+    logger.info('Bot is running!');
   }
 
   private async initializeDefaultServer() {
@@ -55,9 +55,9 @@ export class VibeSSHBot {
       try {
         const result = await this.sshClient.connect(defaultServer.id, defaultServer.config as SSHConfig);
         this.pinHostKey(defaultServer.id, result.hostKeyFingerprint);
-        console.log('Connected to default SSH server');
+        logger.info('Connected to default SSH server');
       } catch (error) {
-        console.error('Failed to connect to default server:', error);
+        logger.error('Failed to connect to default server:', error);
       }
     }
   }
@@ -96,7 +96,7 @@ export class VibeSSHBot {
       const text = msg.text || '';
 
       if (!this.isAuthorized(msg.from?.id, msg.chat.type)) {
-        console.warn(`Rejected message from unauthorized user ${msg.from?.id} (chat ${chatId})`);
+        logger.warn(`Rejected message from unauthorized user ${msg.from?.id} (chat ${chatId})`);
         await this.bot.sendMessage(chatId, '🚫 You are not authorized to use this bot.').catch(() => {});
         return;
       }
@@ -113,7 +113,7 @@ export class VibeSSHBot {
           await this.handleMessage(chatId, userId, text, msg.message_id);
         }
       } catch (error) {
-        console.error('Error handling message:', error);
+        logger.error('Error handling message:', error);
         await this.bot.sendMessage(chatId, '❌ An error occurred. Please try again.');
       }
     });
@@ -126,7 +126,7 @@ export class VibeSSHBot {
       if (!chatId || !data) return;
 
       if (!this.isAuthorized(userId, callbackQuery.message?.chat.type)) {
-        console.warn(`Rejected callback from unauthorized user ${userId} (chat ${chatId})`);
+        logger.warn(`Rejected callback from unauthorized user ${userId} (chat ${chatId})`);
         await this.bot.answerCallbackQuery(callbackQuery.id, {
           text: 'You are not authorized to use this bot.',
           show_alert: true
@@ -137,7 +137,7 @@ export class VibeSSHBot {
       try {
         await this.handleCallbackQuery(chatId, userId, data, callbackQuery.id);
       } catch (error) {
-        console.error('Error handling callback:', error);
+        logger.error('Error handling callback:', error);
         await this.bot.answerCallbackQuery(callbackQuery.id, {
           text: 'An error occurred',
           show_alert: true
@@ -234,7 +234,7 @@ export class VibeSSHBot {
     }
   }
 
-  private async handleVoiceMessage(chatId: number, userId: number, voice: any, messageId?: number) {
+  private async handleVoiceMessage(chatId: number, userId: number, voice: Voice, messageId?: number) {
     const session = this.sessions.getOrCreateSession(userId);
     
     // Send initial processing message
@@ -287,7 +287,7 @@ export class VibeSSHBot {
       await this.handleMessage(chatId, userId, transcribedText, messageId);
       
     } catch (error) {
-      console.error('Voice processing error:', error);
+      logger.error('Voice processing error:', error);
       await this.bot.deleteMessage(chatId, processingMsg.message_id);
       await this.bot.sendMessage(
         chatId,
@@ -297,7 +297,7 @@ export class VibeSSHBot {
     }
   }
 
-  private async handleDocument(chatId: number, userId: number, document: any) {
+  private async handleDocument(chatId: number, userId: number, document: Document) {
     const session = this.sessions.getOrCreateSession(userId);
     
     // Only handle documents during private key setup
@@ -333,7 +333,7 @@ export class VibeSSHBot {
       // Show confirmation
       await this.showServerConfirmation(chatId, userId);
     } catch (error) {
-      console.error('Error handling document:', error);
+      logger.error('Error handling document:', error);
       await this.bot.sendMessage(
         chatId,
         '❌ Failed to process the private key file. Please try again or enter the file path manually.'
@@ -685,7 +685,7 @@ export class VibeSSHBot {
         break;
 
       default:
-        console.warn(`Unhandled callback action: ${data}`);
+        logger.warn(`Unhandled callback action: ${data}`);
         await this.bot.sendMessage(chatId, '🤔 This button no longer does anything. Try /help.');
         break;
     }
@@ -1355,7 +1355,7 @@ export class VibeSSHBot {
 
       return transcription.text.trim();
     } catch (error) {
-      console.error('Transcription error:', error);
+      logger.error('Transcription error:', error);
       return null;
     }
   }
@@ -1705,7 +1705,7 @@ export class VibeSSHBot {
           try {
             await this.bot.deleteMessage(chatId, messageId);
           } catch (e) {
-            console.error('Failed to delete password message:', e);
+            logger.error('Failed to delete password message:', e);
           }
         }
         
@@ -1919,7 +1919,7 @@ export class VibeSSHBot {
           activeCmd.stream.close();
           ok = true;
         } catch (error) {
-          console.error(`Failed to stop command "${activeCmd.command}":`, error);
+          logger.error(`Failed to stop command "${activeCmd.command}":`, error);
         }
       }
       ok ? stopped++ : failed++;
@@ -1937,7 +1937,7 @@ export class VibeSSHBot {
           }
         );
       } catch (error) {
-        console.error('Failed to update stopped-command message:', error);
+        logger.error('Failed to update stopped-command message:', error);
       }
     }
 

@@ -2,6 +2,7 @@ import OpenAI from 'openai';
 import { zodResponseFormat } from 'openai/helpers/zod';
 import { z } from 'zod';
 import { config } from './config';
+import { logger } from './logger';
 
 const CommandSuggestionSchema = z.object({
   commands: z.array(z.string()).min(1).max(4),
@@ -67,7 +68,7 @@ Prefer safe, non-destructive commands and commonly available tools. Include usef
 
       return completion.choices[0]?.message.parsed ?? null;
     } catch (error: unknown) {
-      console.error('OpenAI command analysis failed; falling back to regex parsing:', error);
+      logger.error('OpenAI command analysis failed; falling back to regex parsing:', error);
       return null;
     }
   }

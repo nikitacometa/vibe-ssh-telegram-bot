@@ -2,6 +2,7 @@ import { Client as SSHClient, ClientChannel, ConnectConfig } from 'ssh2';
 import { createHash } from 'crypto';
 import fs from 'fs';
 import { SSHConfig } from './types';
+import { logger } from './logger';
 
 export interface ConnectResult {
   /** SHA-256 fingerprint of the server's host key, for trust-on-first-use pinning. */
@@ -31,13 +32,13 @@ export class SimpleSSHClient {
       let observedFingerprint: string | undefined;
 
       conn.on('ready', () => {
-        console.log(`SSH connection established to ${config.host}`);
+        logger.info(`SSH connection established to ${config.host}`);
         this.connections.set(serverId, conn);
         resolve({ hostKeyFingerprint: observedFingerprint });
       });
 
       conn.on('error', (err) => {
-        console.error(`SSH connection error: ${err.message}`);
+        logger.error(`SSH connection error: ${err.message}`);
         reject(err);
       });
 
@@ -61,7 +62,7 @@ export class SimpleSSHClient {
         hostVerifier: (key: Buffer) => {
           observedFingerprint = `SHA256:${createHash('sha256').update(key).digest('base64')}`;
           if (config.hostKeyFingerprint && config.hostKeyFingerprint !== observedFingerprint) {
-            console.error(
+            logger.error(
               `Host key mismatch for ${config.host}: expected ${config.hostKeyFingerprint}, ` +
               `got ${observedFingerprint}. Refusing to connect.`
             );
@@ -215,7 +216,7 @@ export class SimpleSSHClient {
     if (conn) {
       conn.end();
       this.connections.delete(serverId);
-      console.log(`Disconnected from server: ${serverId}`);
+      logger.info(`Disconnected from server: ${serverId}`);
     }
   }
 

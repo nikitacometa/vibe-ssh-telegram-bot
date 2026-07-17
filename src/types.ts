@@ -1,8 +1,8 @@
 export interface ServerConfig {
   id: string;
   name: string;
-  type: string;
-  config: Record<string, any>;
+  type: 'ssh';
+  config: SSHConfig;
   enabled: boolean;
 }
 

@@ -2,6 +2,7 @@ import dotenv from 'dotenv';
 import fs from 'fs';
 import path from 'path';
 import { ServerConfig, SSHConfig } from './types';
+import { logger } from './logger';
 
 dotenv.config();
 
@@ -44,7 +45,7 @@ export function loadServers(): ServerConfig[] {
       savedServers = JSON.parse(data);
     }
   } catch (error) {
-    console.error('Error loading server config:', error);
+    logger.error('Error loading server config:', error);
   }
 
   // The default server is always derived from env, never from the saved file
