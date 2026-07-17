@@ -99,6 +99,7 @@ export class UIHelpers {
       'ETIMEDOUT': '⏱️ Connection timed out... The server is playing hard to get! 🙈',
       'ENOTFOUND': '🔍 Server not found! Did it go on vacation? 🏖️',
       'Authentication failed': '🔐 Wrong password! The server said "You shall not pass!" 🧙‍♂️',
+      'Host verification failed': '🕵️ The server\'s host key changed since last time — possible MITM, connection refused! Remove the server and re-add it if the change is expected.',
       'EHOSTUNREACH': '🌐 Can\'t reach the host. Check if your internet is having a bad day! 📡',
       'ECONNRESET': '🔄 Connection reset! The server just rage-quit on us! 😤',
       'Permission denied': '🚫 Permission denied! You need the secret handshake! 🤝',

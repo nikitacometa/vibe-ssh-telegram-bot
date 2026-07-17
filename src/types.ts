@@ -13,6 +13,8 @@ export interface SSHConfig {
   privateKeyPath?: string;
   privateKey?: string;
   port?: number;
+  /** Pinned SHA-256 host key fingerprint, recorded on first successful connect. */
+  hostKeyFingerprint?: string;
 }
 
 export interface CommandConfirmation {

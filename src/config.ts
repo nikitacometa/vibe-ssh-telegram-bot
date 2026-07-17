@@ -32,6 +32,7 @@ export function loadServers(): ServerConfig[] {
   // Legacy path kept as a fallback for installs created before the rename
   const legacyPath = path.join(path.dirname(config.serversConfigPath), 'mcp-servers.json');
 
+  let savedServers: ServerConfig[] = [];
   try {
     const configPath = fs.existsSync(config.serversConfigPath)
       ? config.serversConfigPath
@@ -39,30 +40,42 @@ export function loadServers(): ServerConfig[] {
 
     if (configPath) {
       const data = fs.readFileSync(configPath, 'utf-8');
-      return JSON.parse(data);
+      savedServers = JSON.parse(data);
     }
   } catch (error) {
     console.error('Error loading server config:', error);
   }
 
-  // Return default SSH server if no config exists
+  // The default server is always derived from env, never from the saved file
+  const userServers = savedServers.filter(s => s.id !== 'default-ssh');
+
+  if (!config.defaultSSHConfig.host) {
+    return userServers;
+  }
+
   return [{
     id: 'default-ssh',
     name: 'Default SSH Server',
     type: 'ssh',
     config: config.defaultSSHConfig,
     enabled: true
-  }];
+  }, ...userServers];
 }
 
 export function saveServers(servers: ServerConfig[]): void {
   const dir = path.dirname(config.serversConfigPath);
   if (!fs.existsSync(dir)) {
-    fs.mkdirSync(dir, { recursive: true });
+    fs.mkdirSync(dir, { recursive: true, mode: 0o700 });
   }
+
+  // The file holds SSH credentials: keep it owner-only, and never persist
+  // the env-derived default server (its secrets already live in .env)
+  const persistable = servers.filter(s => s.id !== 'default-ssh');
 
   fs.writeFileSync(
     config.serversConfigPath,
-    JSON.stringify(servers, null, 2)
+    JSON.stringify(persistable, null, 2),
+    { mode: 0o600 }
   );
+  fs.chmodSync(config.serversConfigPath, 0o600);
 }

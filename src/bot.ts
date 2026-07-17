@@ -50,11 +50,29 @@ export class VibeSSHBot {
     const defaultServer = this.servers.find(s => s.id === 'default-ssh');
     if (defaultServer && defaultServer.enabled && defaultServer.config.host) {
       try {
-        await this.sshClient.connect(defaultServer.id, defaultServer.config as SSHConfig);
+        const result = await this.sshClient.connect(defaultServer.id, defaultServer.config as SSHConfig);
+        this.pinHostKey(defaultServer.id, result.hostKeyFingerprint);
         console.log('Connected to default SSH server');
       } catch (error) {
         console.error('Failed to connect to default server:', error);
       }
+    }
+  }
+
+  /**
+   * Trust-on-first-use: remember the host key seen on the first successful
+   * connect so any later change (possible MITM) refuses the connection.
+   */
+  private pinHostKey(serverId: string, fingerprint?: string) {
+    if (!fingerprint) return;
+    const server = this.servers.find(s => s.id === serverId);
+    const sshConfig = server?.config as SSHConfig | undefined;
+    if (!server || !sshConfig || sshConfig.hostKeyFingerprint) return;
+
+    sshConfig.hostKeyFingerprint = fingerprint;
+    // The env-derived default server is pinned in memory only
+    if (serverId !== 'default-ssh') {
+      saveServers(this.servers);
     }
   }
 
@@ -1079,10 +1097,11 @@ export class VibeSSHBot {
     }, 300);
 
     try {
-      await this.sshClient.connect(serverId, server.config as SSHConfig);
+      const result = await this.sshClient.connect(serverId, server.config as SSHConfig);
+      this.pinHostKey(serverId, result.hostKeyFingerprint);
       const session = this.getOrCreateSession(userId);
       session.activeServer = serverId;
-      
+
       clearInterval(progressInterval);
       
       // Show success
