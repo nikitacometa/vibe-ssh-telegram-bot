@@ -23,6 +23,20 @@ export interface CommandConfirmation {
   serverId: string;
   timestamp: number;
   confirmed: boolean;
+  /** Id of the button action this confirmation belongs to. */
+  actionId?: string;
+}
+
+/**
+ * A command referenced from an inline button. Buttons carry only a short
+ * action id (Telegram limits callback_data to 64 bytes), the command itself
+ * lives here.
+ */
+export interface PendingAction {
+  userId: number;
+  command: string;
+  serverId: string;
+  createdAt: number;
 }
 
 export interface UserSession {
@@ -38,7 +52,7 @@ export interface UserSession {
     aiSuggestions: boolean;
   };
   serverSetup?: ServerSetupState;
-  activeCommands?: Map<string, ActiveCommand>;
+  activeCommands: Map<string, ActiveCommand>;
 }
 
 export interface ServerSetupState {
@@ -46,9 +60,11 @@ export interface ServerSetupState {
   serverData: Partial<SSHConfig & { name: string; privateKey?: string }>;
 }
 
+import type { ClientChannel } from 'ssh2';
+
 export interface ActiveCommand {
   messageId: number;
-  process?: any;
+  stream?: ClientChannel;
   startTime: number;
   command: string;
   serverId: string;

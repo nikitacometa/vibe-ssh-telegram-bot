@@ -8,9 +8,19 @@ export interface ConnectResult {
   hostKeyFingerprint?: string;
 }
 
+export interface CommandResult {
+  stdout: string;
+  stderr: string;
+  exitCode: number | null;
+  timedOut: boolean;
+  truncated: boolean;
+}
+
 const CONNECT_TIMEOUT_MS = 15_000;
 const KEEPALIVE_INTERVAL_MS = 10_000;
 const KEEPALIVE_COUNT_MAX = 3;
+const MAX_OUTPUT_BYTES = 100_000;
+const COMMAND_TIMEOUT_MS = 60_000;
 
 export class SimpleSSHClient {
   private connections: Map<string, SSHClient> = new Map();
@@ -74,7 +84,7 @@ export class SimpleSSHClient {
     });
   }
 
-  async executeCommand(serverId: string, command: string): Promise<string> {
+  async executeCommand(serverId: string, command: string): Promise<CommandResult> {
     return new Promise((resolve, reject) => {
       const conn = this.connections.get(serverId);
 
@@ -83,29 +93,79 @@ export class SimpleSSHClient {
         return;
       }
 
-      let output = '';
-      let errorOutput = '';
-
       conn.exec(command, (err, stream) => {
         if (err) {
           reject(err);
           return;
         }
 
-        stream.on('close', (code: number) => {
-          if (code !== 0 && errorOutput) {
-            resolve(`Command exited with code ${code}\n\nError output:\n${errorOutput}\n\nStandard output:\n${output}`);
-          } else {
-            resolve(output || '(No output)');
+        const stdoutChunks: Buffer[] = [];
+        const stderrChunks: Buffer[] = [];
+        let capturedBytes = 0;
+        let truncated = false;
+        let settled = false;
+
+        const appendOutput = (data: Buffer, destination: Buffer[]): void => {
+          const remainingBytes = MAX_OUTPUT_BYTES - capturedBytes;
+          if (remainingBytes <= 0) {
+            truncated = true;
+            return;
           }
+
+          if (data.length > remainingBytes) {
+            destination.push(data.subarray(0, remainingBytes));
+            capturedBytes += remainingBytes;
+            truncated = true;
+            return;
+          }
+
+          destination.push(data);
+          capturedBytes += data.length;
+        };
+
+        const buildResult = (exitCode: number | null, timedOut: boolean): CommandResult => ({
+          stdout: Buffer.concat(stdoutChunks).toString(),
+          stderr: Buffer.concat(stderrChunks).toString(),
+          exitCode,
+          timedOut,
+          truncated
+        });
+
+        const commandTimer = setTimeout(() => {
+          if (settled) return;
+
+          settled = true;
+          clearTimeout(commandTimer);
+
+          try {
+            stream.signal('KILL');
+          } catch {
+            // The channel may already be closing; still force it closed below.
+          }
+
+          try {
+            stream.close();
+          } catch {
+            // Resolve with the captured output even if the channel already closed.
+          }
+
+          resolve(buildResult(null, true));
+        }, COMMAND_TIMEOUT_MS);
+
+        stream.on('close', (code: number, _signal?: string) => {
+          if (settled) return;
+
+          settled = true;
+          clearTimeout(commandTimer);
+          resolve(buildResult(code, false));
         });
 
         stream.on('data', (data: Buffer) => {
-          output += data.toString();
+          appendOutput(data, stdoutChunks);
         });
 
         stream.stderr.on('data', (data: Buffer) => {
-          errorOutput += data.toString();
+          appendOutput(data, stderrChunks);
         });
       });
     });

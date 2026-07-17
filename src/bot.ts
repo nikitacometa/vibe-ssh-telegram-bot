@@ -4,7 +4,7 @@ import { SimpleSSHClient } from './ssh-client';
 import { CommandParser } from './command-parser';
 import { assessCommandRisk } from './command-safety';
 import { UIHelpers } from './ui-helpers';
-import { UserSession, ServerConfig, CommandConfirmation, SSHConfig, ServerSetupState, ActiveCommand } from './types';
+import { UserSession, ServerConfig, CommandConfirmation, SSHConfig, PendingAction } from './types';
 
 export class VibeSSHBot {
   private bot: TelegramBot;
@@ -13,6 +13,8 @@ export class VibeSSHBot {
   private uiHelpers: UIHelpers;
   private userSessions: Map<number, UserSession> = new Map();
   private servers: ServerConfig[] = [];
+  private pendingActions: Map<string, PendingAction> = new Map();
+  private nextActionId = 1;
 
   constructor() {
     this.bot = new TelegramBot(config.telegramBotToken, { polling: true });
@@ -57,6 +59,40 @@ export class VibeSSHBot {
         console.error('Failed to connect to default server:', error);
       }
     }
+  }
+
+  /**
+   * Registers a command behind a short action id. Telegram limits
+   * callback_data to 64 bytes, so buttons never carry the command itself —
+   * the old base64-in-callback_data approach silently truncated commands.
+   */
+  private registerAction(userId: number, command: string, serverId: string): string {
+    const id = String(this.nextActionId++);
+    this.pendingActions.set(id, { userId, command, serverId, createdAt: Date.now() });
+
+    // Evict the oldest entries so the registry can't grow without bound
+    if (this.pendingActions.size > 200) {
+      const oldest = this.pendingActions.keys().next().value;
+      if (oldest) this.pendingActions.delete(oldest);
+    }
+    return id;
+  }
+
+  /** Looks up an action, enforcing that only its owner can use the button. */
+  private getAction(id: string, userId: number): PendingAction | undefined {
+    const action = this.pendingActions.get(id);
+    return action && action.userId === userId ? action : undefined;
+  }
+
+  /**
+   * Consumes a confirmation atomically: the entry is removed before any await,
+   * so a double-click or a stale button can never execute a command twice
+   * or execute a different command than the one shown.
+   */
+  private takeAction(id: string, userId: number): PendingAction | undefined {
+    const action = this.getAction(id, userId);
+    if (action) this.pendingActions.delete(id);
+    return action;
   }
 
   /**
@@ -367,10 +403,31 @@ export class VibeSSHBot {
       case '/addserver':
         await this.handleAddServer(chatId, userId);
         break;
+      case '/removeserver':
+        await this.handleRemoveServerMenu(chatId);
+        break;
       case '/settings':
         await this.handleSettings(chatId, userId);
         break;
     }
+  }
+
+  private async handleRemoveServerMenu(chatId: number) {
+    const removable = this.servers.filter(s => s.id !== 'default-ssh');
+
+    if (removable.length === 0) {
+      await this.bot.sendMessage(
+        chatId,
+        'ℹ️ No removable servers. The default server is configured via .env; servers added with /addserver show up here.'
+      );
+      return;
+    }
+
+    await this.bot.sendMessage(chatId, '🗑️ Which server do you want to remove?', {
+      reply_markup: {
+        inline_keyboard: removable.map(s => [{ text: `🗑️ ${s.name}`, callback_data: `remove_${s.id}` }])
+      }
+    });
   }
 
   private async handleBashCommand(chatId: number, userId: number, command: string) {
@@ -428,15 +485,18 @@ export class VibeSSHBot {
       }
     }
 
+    const actionId = this.registerAction(userId, command, session.activeServer);
+
     // Create confirmation request
     const confirmation: CommandConfirmation = {
       userId,
       command,
       serverId: session.activeServer,
       timestamp: Date.now(),
-      confirmed: false
+      confirmed: false,
+      actionId
     };
-    
+
     session.pendingConfirmation = confirmation;
 
     const serverName = this.servers.find(s => s.id === session.activeServer)?.name || session.activeServer;
@@ -470,8 +530,8 @@ export class VibeSSHBot {
         reply_markup: {
           inline_keyboard: [
             [
-              { text: '🚀 Let\'s Go!', callback_data: 'confirm_cmd' },
-              { text: '🛑 Abort!', callback_data: 'cancel_cmd' }
+              { text: '🚀 Let\'s Go!', callback_data: `confirm:${actionId}` },
+              { text: '🛑 Abort!', callback_data: `cancel:${actionId}` }
             ],
             [
               { text: '✏️ Edit First', callback_data: 'modify_cmd' },
@@ -508,15 +568,48 @@ export class VibeSSHBot {
     await this.bot.answerCallbackQuery(callbackId, { text: '⏳ Processing...' });
 
     switch (true) {
-      case data === 'confirm_cmd' && !!session.pendingConfirmation:
-        await this.executeConfirmedCommand(chatId, userId);
+      case data.startsWith('confirm:'): {
+        const id = data.slice('confirm:'.length);
+        const action = this.takeAction(id, userId);
+        if (!action) {
+          await this.bot.sendMessage(chatId, '⌛ This confirmation has expired or was already handled.');
+          break;
+        }
+        // Only clear the pending confirmation if it's the one being confirmed —
+        // a stale button must not disturb a newer command's state
+        if (session.pendingConfirmation?.actionId === id) {
+          session.pendingConfirmation = undefined;
+        }
+        await this.executeConfirmedCommand(chatId, userId, action);
         break;
-        
-      case data === 'cancel_cmd':
-        session.pendingConfirmation = undefined;
+      }
+
+      case data.startsWith('cancel:'): {
+        const id = data.slice('cancel:'.length);
+        const action = this.takeAction(id, userId);
+        if (!action) {
+          await this.bot.sendMessage(chatId, '⌛ This command was already handled or expired.');
+          break;
+        }
+        if (session.pendingConfirmation?.actionId === id) {
+          session.pendingConfirmation = undefined;
+        }
         await this.bot.sendMessage(chatId, '❌ Command cancelled. What would you like to do next?', this.uiHelpers.createQuickCommands());
         break;
-        
+      }
+
+      // A button that proposes a command (suggestion, history, retry):
+      // it re-enters the normal confirmation flow, so it stays reusable
+      case data.startsWith('run:'): {
+        const action = this.getAction(data.slice('run:'.length), userId);
+        if (!action) {
+          await this.bot.sendMessage(chatId, '⌛ This button has expired. Type the command instead.');
+          break;
+        }
+        await this.handleBashCommand(chatId, userId, action.command);
+        break;
+      }
+
       case data === 'modify_cmd':
         if (session.pendingConfirmation) {
           await this.bot.sendMessage(
@@ -527,21 +620,11 @@ export class VibeSSHBot {
           session.pendingConfirmation = undefined;
         }
         break;
-        
+
       case data === 'show_history':
         await this.handleShowHistory(chatId, userId);
         break;
-        
-      case data.startsWith('history_'):
-        const encodedCmd = data.replace('history_', '');
-        try {
-          const command = Buffer.from(encodedCmd, 'base64').toString();
-          await this.handleBashCommand(chatId, userId, command);
-        } catch (e) {
-          await this.bot.sendMessage(chatId, '❌ Could not restore command from history');
-        }
-        break;
-        
+
       case data.startsWith('connect_'):
         const serverId = data.replace('connect_', '');
         await this.connectToServer(chatId, userId, serverId);
@@ -570,17 +653,15 @@ export class VibeSSHBot {
         const statusServerId = data.replace('status_', '');
         await this.handleServerStatus(chatId, statusServerId);
         break;
-        
-      case data.startsWith('suggest_'):
-        const encodedCommand = data.replace('suggest_', '');
-        try {
-          const command = Buffer.from(encodedCommand, 'base64').toString();
-          await this.handleBashCommand(chatId, userId, command);
-        } catch (e) {
-          await this.bot.sendMessage(chatId, '❌ Could not execute suggested command');
-        }
+
+      case data.startsWith('disconnect_'):
+        await this.handleDisconnectServer(chatId, userId, data.replace('disconnect_', ''));
         break;
-        
+
+      case data.startsWith('remove_'):
+        await this.handleRemoveServer(chatId, data.replace('remove_', ''));
+        break;
+
       case data === 'custom_command':
         await this.bot.sendMessage(
           chatId,
@@ -628,27 +709,35 @@ export class VibeSSHBot {
         break;
         
       case data === 'back_to_main':
+      case data === 'show_quick_commands':
         await this.bot.sendMessage(chatId, 'What would you like to do?', this.uiHelpers.createQuickCommands());
+        break;
+
+      case data === 'help':
+        await this.handleHelp(chatId);
+        break;
+
+      default:
+        console.warn(`Unhandled callback action: ${data}`);
+        await this.bot.sendMessage(chatId, '🤔 This button no longer does anything. Try /help.');
         break;
     }
   }
 
-  private async executeConfirmedCommand(chatId: number, userId: number) {
-    const session = this.getOrCreateSession(userId);
-    const confirmation = session.pendingConfirmation;
-    
-    if (!confirmation) return;
+  private async executeConfirmedCommand(chatId: number, userId: number, action: PendingAction) {
+    const confirmation: CommandConfirmation = {
+      userId,
+      command: action.command,
+      serverId: action.serverId,
+      timestamp: action.createdAt,
+      confirmed: true
+    };
 
-    // Check if this is a streaming command
-    const isStreamingCommand = this.isStreamingCommand(confirmation.command);
-    
-    if (isStreamingCommand) {
+    if (this.isStreamingCommand(confirmation.command)) {
       await this.executeStreamingCommand(chatId, userId, confirmation);
     } else {
       await this.executeRegularCommand(chatId, userId, confirmation);
     }
-    
-    session.pendingConfirmation = undefined;
   }
 
   private isStreamingCommand(command: string): boolean {
@@ -722,7 +811,7 @@ export class VibeSSHBot {
               `💻 Command: \`${confirmation.command}\`\n` +
               `⏰ Runtime: ${runtime}s\n` +
               `📊 Updates: ${updateCount}\n\n` +
-              `📜 **Live Output:**\n\`\`\`\n${displayOutput.slice(-1800) || 'No output yet...'}\n\`\`\``,
+              `📜 **Live Output:**\n\`\`\`\n${this.uiHelpers.escapeForCodeBlock(displayOutput.slice(-1800)) || 'No output yet...'}\n\`\`\``,
               {
                 chat_id: chatId,
                 message_id: statusMsg.message_id,
@@ -749,7 +838,7 @@ export class VibeSSHBot {
             `💻 Command: \`${confirmation.command}\`\n` +
             `⏰ Total runtime: ${runtime}s\n` +
             `🔢 Exit code: ${code}\n\n` +
-            `📜 **Final Output:**\n\`\`\`\n${output.slice(-1800) || 'No output'}\n\`\`\``,
+            `📜 **Final Output:**\n\`\`\`\n${this.uiHelpers.escapeForCodeBlock(output.slice(-1800)) || 'No output'}\n\`\`\``,
             {
               chat_id: chatId,
               message_id: statusMsg.message_id,
@@ -758,14 +847,14 @@ export class VibeSSHBot {
           ).catch(() => {});
           
           // Remove from active commands
-          session.activeCommands?.delete(statusMsg.message_id.toString());
+          session.activeCommands.delete(statusMsg.message_id.toString());
         }
       );
 
       // Store the active command for stop functionality
-      session.activeCommands?.set(statusMsg.message_id.toString(), {
+      session.activeCommands.set(statusMsg.message_id.toString(), {
         messageId: statusMsg.message_id,
-        process: stream,
+        stream,
         startTime,
         command: confirmation.command,
         serverId: confirmation.serverId
@@ -823,58 +912,69 @@ export class VibeSSHBot {
       clearInterval(animationInterval);
       await this.bot.deleteMessage(chatId, loadingMsg.message_id);
 
-      // Store the command output for context
-      session.lastCommandOutput = result;
+      // Merge stdout and stderr for display; keep the combined text for context
+      const combinedOutput = [result.stdout, result.stderr].filter(Boolean).join('\n').trim();
+      session.lastCommandOutput = combinedOutput;
 
-      // Format and send result
-      const formattedOutput = this.uiHelpers.formatCommandOutput(result);
-      
-      const successMessages = [
-        '✅ **Boom! Command executed!**',
-        '🎯 **Bullseye! Direct hit!**',
-        '🚀 **Mission accomplished!**',
-        '⚡ **Zap! Done in a flash!**',
-        '🎪 **Ta-da! Command complete!**',
-        '🏆 **Victory! Command conquered!**',
-        '🎉 **Success! High five!**'
-      ];
-      
-      const randomSuccess = successMessages[Math.floor(Math.random() * successMessages.length)];
-      
+      const succeeded = !result.timedOut && result.exitCode === 0;
+
+      // Header reflects what actually happened, not a blanket "success"
+      let header: string;
+      if (result.timedOut) {
+        header = `⏱️ **Command timed out** (over 60s, killed)`;
+      } else if (succeeded) {
+        const successMessages = [
+          '✅ **Boom! Command executed!**',
+          '🎯 **Bullseye! Direct hit!**',
+          '🚀 **Mission accomplished!**',
+          '⚡ **Zap! Done in a flash!**',
+          '🏆 **Victory! Command conquered!**'
+        ];
+        header = successMessages[Math.floor(Math.random() * successMessages.length)];
+      } else {
+        header = `⚠️ **Command exited with code ${result.exitCode}**`;
+      }
+
       // Add execution time emoji
       let timeEmoji = '🐆'; // cheetah for fast
       if (executionTime > 5000) timeEmoji = '🐢'; // turtle for slow
       else if (executionTime > 1000) timeEmoji = '🐇'; // rabbit for medium
-      
+
       // Generate next command suggestions
-      const nextSuggestions = await this.generateNextCommandSuggestions(confirmation.command, session.lastCommandOutput || '');
-      
-      // Create suggestion buttons
+      const nextSuggestions = await this.generateNextCommandSuggestions(confirmation.command, combinedOutput);
+
       const suggestionButtons = nextSuggestions.map(cmd => ({
         text: `💫 ${cmd}`,
-        callback_data: `suggest_${Buffer.from(cmd).toString('base64').substring(0, 60)}`
+        callback_data: `run:${this.registerAction(userId, cmd, confirmation.serverId)}`
       }));
-      
+
       const keyboard = [
         suggestionButtons,
         [
-          { text: '🔄 Again!', callback_data: `history_${Buffer.from(confirmation.command).toString('base64').substring(0, 60)}` },
+          { text: '🔄 Again!', callback_data: `run:${this.registerAction(userId, confirmation.command, confirmation.serverId)}` },
           { text: '📚 History', callback_data: 'show_history' }
         ],
         [{ text: '🏠 Home', callback_data: 'show_quick_commands' }]
       ];
-      
+
+      const truncationNote = result.truncated ? '\n📄 _Output truncated (exceeded size limit)_' : '';
+
+      // The output is sent as its own fenced message(s); the metadata + buttons
+      // go last so a long, chunked output never splits across a code fence.
+      const outputText = this.uiHelpers.escapeForCodeBlock(combinedOutput || '(No output)');
+      const outputChunks = this.uiHelpers.chunkForTelegram(outputText, 3900);
+      for (const chunk of outputChunks) {
+        await this.bot.sendMessage(chatId, `\`\`\`\n${chunk}\n\`\`\``, { parse_mode: 'Markdown' });
+      }
+
       await this.bot.sendMessage(
         chatId,
-        `${randomSuccess}\n\n` +
+        `${header}\n\n` +
         `📍 **Server:** ${this.servers.find(s => s.id === confirmation.serverId)?.name}\n` +
-        `⏱️ **Speed:** ${(executionTime / 1000).toFixed(2)}s ${timeEmoji}\n\n` +
-        `**Output:**\n${formattedOutput}`,
+        `⏱️ **Speed:** ${(executionTime / 1000).toFixed(2)}s ${timeEmoji}${truncationNote}`,
         {
           parse_mode: 'Markdown',
-          reply_markup: {
-            inline_keyboard: keyboard
-          }
+          reply_markup: { inline_keyboard: keyboard }
         }
       );
 
@@ -899,7 +999,7 @@ export class VibeSSHBot {
           reply_markup: {
             inline_keyboard: [
               [
-                { text: '🔄 Retry', callback_data: `history_${Buffer.from(confirmation.command).toString('base64').substring(0, 60)}` },
+                { text: '🔄 Retry', callback_data: `run:${this.registerAction(userId, confirmation.command, confirmation.serverId)}` },
                 { text: '🔌 Reconnect', callback_data: `connect_${confirmation.serverId}` }
               ],
               [{ text: '❓ Get Help', callback_data: 'help' }]
@@ -1144,7 +1244,7 @@ export class VibeSSHBot {
             inline_keyboard: [
               [
                 { text: '🔄 Retry', callback_data: `connect_${serverId}` },
-                { text: '⚙️ Edit Server', callback_data: `edit_${serverId}` }
+                { text: '🗑️ Remove Server', callback_data: `remove_${serverId}` }
               ],
               [{ text: '📡 Other Servers', callback_data: 'view_servers' }]
             ]
@@ -1152,6 +1252,58 @@ export class VibeSSHBot {
         }
       );
     }
+  }
+
+  private async handleDisconnectServer(chatId: number, userId: number, serverId: string) {
+    const session = this.getOrCreateSession(userId);
+    const serverName = this.servers.find(s => s.id === serverId)?.name || serverId;
+
+    try {
+      await this.sshClient.disconnect(serverId);
+      if (session.activeServer === serverId) {
+        session.activeServer = undefined;
+      }
+      await this.bot.sendMessage(chatId, `✅ Disconnected from ${serverName}`);
+    } catch (error) {
+      await this.bot.sendMessage(chatId, `❌ Error disconnecting: ${error}`);
+    }
+  }
+
+  private async handleRemoveServer(chatId: number, serverId: string) {
+    const server = this.servers.find(s => s.id === serverId);
+    if (!server) {
+      await this.bot.sendMessage(chatId, '❌ Server not found. It may have been removed already.');
+      return;
+    }
+
+    if (serverId === 'default-ssh') {
+      await this.bot.sendMessage(
+        chatId,
+        'ℹ️ The default server comes from your .env file — remove its SSH_* variables and restart the bot to drop it.'
+      );
+      return;
+    }
+
+    if (this.sshClient.isConnected(serverId)) {
+      await this.sshClient.disconnect(serverId);
+    }
+
+    // Sessions pointing at the removed server must not keep executing on it
+    for (const session of this.userSessions.values()) {
+      if (session.activeServer === serverId) {
+        session.activeServer = undefined;
+      }
+    }
+
+    this.servers = this.servers.filter(s => s.id !== serverId);
+    saveServers(this.servers);
+
+    await this.bot.sendMessage(chatId, `🗑️ Server *${server.name}* removed.`, {
+      parse_mode: 'Markdown',
+      reply_markup: {
+        inline_keyboard: [[{ text: '📡 View Servers', callback_data: 'view_servers' }]]
+      }
+    });
   }
 
   private async handleDisconnect(chatId: number, userId: number) {
@@ -1311,12 +1463,18 @@ export class VibeSSHBot {
       return;
     }
     
+    const serverId = session.activeServer || this.sshClient.getConnectedServers()[0] || 'default-ssh';
+    const keyboard = session.commandHistory.slice(-5).map(cmd => [{
+      text: `📜 ${cmd.substring(0, 30)}${cmd.length > 30 ? '...' : ''}`,
+      callback_data: `run:${this.registerAction(userId, cmd, serverId)}`
+    }]);
+
     await this.bot.sendMessage(
       chatId,
       `📜 **Recent Commands**\n\nClick to run again:`,
       {
         parse_mode: 'Markdown',
-        reply_markup: this.uiHelpers.createCommandHistoryKeyboard(session.commandHistory)
+        reply_markup: { inline_keyboard: keyboard }
       }
     );
   }
@@ -1394,9 +1552,11 @@ export class VibeSSHBot {
   }
 
   private async showCommandSuggestions(chatId: number, userId: number, intent: string, suggestions: string[], explanation?: string, category?: string) {
+    const session = this.getOrCreateSession(userId);
+    const serverId = session.activeServer || this.sshClient.getConnectedServers()[0] || 'default-ssh';
     const keyboard = suggestions.slice(0, 6).map(cmd => ([{
       text: `💻 ${cmd}`,
-      callback_data: `suggest_${Buffer.from(cmd).toString('base64')}`
+      callback_data: `run:${this.registerAction(userId, cmd, serverId)}`
     }]));
     
     // Add manual input option
@@ -1428,24 +1588,6 @@ export class VibeSSHBot {
         }
       }
     );
-  }
-
-  private splitIntoChunks(text: string, maxLength: number): string[] {
-    const chunks: string[] = [];
-    let currentChunk = '';
-    
-    const lines = text.split('\n');
-    for (const line of lines) {
-      if (currentChunk.length + line.length + 1 > maxLength) {
-        if (currentChunk) chunks.push(currentChunk);
-        currentChunk = line;
-      } else {
-        currentChunk += (currentChunk ? '\n' : '') + line;
-      }
-    }
-    
-    if (currentChunk) chunks.push(currentChunk);
-    return chunks;
   }
 
   private async handleAddServer(chatId: number, userId: number) {
@@ -1811,36 +1953,52 @@ export class VibeSSHBot {
   private async handleStopCommand(chatId: number, userId: number) {
     const session = this.getOrCreateSession(userId);
     
-    if (!session.activeCommands || session.activeCommands.size === 0) {
+    if (session.activeCommands.size === 0) {
       await this.bot.sendMessage(chatId, '❌ No active commands to stop.');
       return;
     }
     
-    // Stop all active commands
-    for (const [commandId, activeCmd] of session.activeCommands) {
-      if (activeCmd.process) {
+    // Stop all active commands. ssh2's ClientChannel has no kill(); send an
+    // interrupt/terminate signal and close the channel instead.
+    let stopped = 0;
+    let failed = 0;
+    for (const [, activeCmd] of session.activeCommands) {
+      let ok = false;
+      if (activeCmd.stream) {
         try {
-          activeCmd.process.kill();
-        } catch (e) {}
+          activeCmd.stream.signal('INT');
+          activeCmd.stream.close();
+          ok = true;
+        } catch (error) {
+          console.error(`Failed to stop command "${activeCmd.command}":`, error);
+        }
       }
-      
+      ok ? stopped++ : failed++;
+
       try {
         await this.bot.editMessageText(
-          `⏹️ **Command Stopped**\n\n` +
+          `⏹️ **Command ${ok ? 'Stopped' : 'Stop Failed'}**\n\n` +
           `Command: \`${activeCmd.command}\`\n` +
           `Runtime: ${((Date.now() - activeCmd.startTime) / 1000).toFixed(1)}s\n\n` +
-          `Stopped by user request.`,
+          `${ok ? 'Interrupt signal sent.' : 'Could not signal the remote process — it may still be running.'}`,
           {
             chat_id: chatId,
             message_id: activeCmd.messageId,
             parse_mode: 'Markdown'
           }
         );
-      } catch (e) {}
+      } catch (error) {
+        console.error('Failed to update stopped-command message:', error);
+      }
     }
-    
+
     session.activeCommands.clear();
-    await this.bot.sendMessage(chatId, '✅ All commands stopped.');
+    await this.bot.sendMessage(
+      chatId,
+      failed === 0
+        ? `✅ Stopped ${stopped} command${stopped === 1 ? '' : 's'}.`
+        : `⚠️ Stopped ${stopped}, failed to signal ${failed}. Check the server directly if a process is stuck.`
+    );
   }
 
 }

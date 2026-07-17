@@ -43,10 +43,46 @@ export class UIHelpers {
     
     if (lines.length > maxLines) {
       const truncated = lines.slice(0, maxLines).join('\n');
-      return `\`\`\`\n${truncated}\n\`\`\`\n\n📄 _Output truncated (${lines.length - maxLines} more lines)_`;
+      return `\`\`\`\n${this.escapeForCodeBlock(truncated)}\n\`\`\`\n\n📄 _Output truncated (${lines.length - maxLines} more lines)_`;
     }
     
-    return `\`\`\`\n${output}\n\`\`\``;
+    return `\`\`\`\n${this.escapeForCodeBlock(output)}\n\`\`\``;
+  }
+
+  /** Escapes text so it is safe inside a Markdown (legacy) triple-backtick code block. */
+  escapeForCodeBlock(text: string): string {
+    // Modifier letter grave accent preserves readability without allowing a fence to close.
+    const escaped = text.replace(/`/g, 'ˋ');
+    const trailingBackslashCount = escaped.match(/\\+$/)?.[0].length ?? 0;
+
+    return trailingBackslashCount % 2 === 1 ? escaped.slice(0, -1) : escaped;
+  }
+
+  /**
+   * Splits an already-formatted message into chunks that each fit Telegram's
+   * 4096-char limit, breaking on newlines where possible. If a single line
+   * exceeds the limit it is hard-split. Returns at least one chunk.
+   */
+  chunkForTelegram(text: string, maxLength = 4000): string[] {
+    if (!Number.isInteger(maxLength) || maxLength <= 0) {
+      throw new RangeError('maxLength must be a positive integer');
+    }
+
+    if (text.length === 0) return [''];
+
+    const chunks: string[] = [];
+    let remaining = text;
+
+    while (remaining.length > maxLength) {
+      const newlineIndex = remaining.lastIndexOf('\n', maxLength - 1);
+      const splitIndex = newlineIndex >= 0 ? newlineIndex + 1 : maxLength;
+
+      chunks.push(remaining.slice(0, splitIndex));
+      remaining = remaining.slice(splitIndex);
+    }
+
+    chunks.push(remaining);
+    return chunks;
   }
 
   createProgressBar(progress: number, total: number = 100): string {
@@ -173,15 +209,6 @@ ${statusEmoji} _${statusText}_
 🔐 **Security:** ${server.config.password ? '🔑 Password' : '🗝️ SSH Key'}
 ${isConnected ? '\n⚡ _Ready for your commands!_' : '\n💤 _Click to wake up!_'}
     `.trim();
-  }
-
-  createCommandHistoryKeyboard(history: string[]): any {
-    const keyboard = history.slice(-5).map(cmd => [{
-      text: `📜 ${cmd.substring(0, 30)}${cmd.length > 30 ? '...' : ''}`,
-      callback_data: `history_${Buffer.from(cmd).toString('base64').substring(0, 60)}`
-    }]);
-    
-    return { inline_keyboard: keyboard };
   }
 
   formatWelcomeMessage(userName?: string): string {
