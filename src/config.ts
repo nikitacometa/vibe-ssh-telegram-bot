@@ -26,7 +26,10 @@ export const config = {
     username: process.env.SSH_USERNAME || '',
     password: process.env.SSH_PASSWORD,
     privateKeyPath: process.env.SSH_PRIVATE_KEY_PATH,
-    port: parseInt(process.env.SSH_PORT || '22', 10)
+    port: parseInt(process.env.SSH_PORT || '22', 10),
+    // Persistent host-key pin for the default server. Without it the pin is
+    // trust-on-first-use and re-learned on each restart.
+    hostKeyFingerprint: process.env.SSH_HOST_KEY_FINGERPRINT || undefined
   } as SSHConfig
 };
 

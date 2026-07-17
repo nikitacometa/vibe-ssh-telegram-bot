@@ -58,9 +58,12 @@ export class SimpleSSHClient {
         keepaliveInterval: KEEPALIVE_INTERVAL_MS,
         keepaliveCountMax: KEEPALIVE_COUNT_MAX,
         // Trust-on-first-use host key pinning: remember the key on first
-        // connect, refuse to connect if it ever changes (possible MITM)
+        // connect, refuse to connect if it ever changes (possible MITM).
+        // The base64 is stripped of '=' padding to match OpenSSH's
+        // `ssh-keygen -lf` fingerprint format so pins can be set by hand.
         hostVerifier: (key: Buffer) => {
-          observedFingerprint = `SHA256:${createHash('sha256').update(key).digest('base64')}`;
+          const digest = createHash('sha256').update(key).digest('base64').replace(/=+$/, '');
+          observedFingerprint = `SHA256:${digest}`;
           if (config.hostKeyFingerprint && config.hostKeyFingerprint !== observedFingerprint) {
             logger.error(
               `Host key mismatch for ${config.host}: expected ${config.hostKeyFingerprint}, ` +

@@ -96,6 +96,7 @@ All configuration is via environment variables (see [`.env.example`](./.env.exam
 | `SSH_PASSWORD` | no | Default server password (or use a key) |
 | `SSH_PRIVATE_KEY_PATH` | no | Path to a private key instead of a password |
 | `SSH_PORT` | no | Default SSH port (defaults to 22) |
+| `SSH_HOST_KEY_FINGERPRINT` | no | Persistent host-key pin (`SHA256:…`) for the default server; without it the pin is trust-on-first-use |
 | `OPENAI_API_KEY` | no | Enables natural-language + voice; without it, regex parsing is used |
 | `OPENAI_MODEL` | no | Chat model for command analysis (default `gpt-4o-mini`) |
 | `WHISPER_LANGUAGE` | no | Pin the voice language (ISO-639-1); empty = auto-detect |
@@ -108,7 +109,7 @@ This bot executes arbitrary shell commands on real machines, so the safety desig
 - **Fail-closed authorization.** No `ALLOWED_TELEGRAM_USER_IDS` → the bot exits on startup. Every message and button press is checked against the allowlist, and the bot only responds in private chats.
 - **Explicit confirmation.** Nothing runs until you tap confirm on a preview that shows the exact command and target. Inline buttons carry a short opaque id (not the command), so a stale or duplicated tap can never run a different or repeated command.
 - **Command risk tiers.** `command-safety.ts` refuses filesystem-destroying commands and warns on destructive ones before you confirm.
-- **Host-key pinning.** The first successful connection records the server's SHA-256 host key; a later mismatch (possible MITM) refuses the connection.
+- **Host-key pinning.** The first successful connection records the server's SHA-256 host key; a later mismatch (possible MITM) refuses the connection. For the default server, set `SSH_HOST_KEY_FINGERPRINT` to pin it persistently across restarts.
 - **Bounded execution.** Commands have a timeout and a captured-output cap so a runaway process can't wedge the bot.
 - **Least privilege.** Credentials live in `.env` / an owner-only (`0600`) config file, and the Docker image runs as a non-root user.
 

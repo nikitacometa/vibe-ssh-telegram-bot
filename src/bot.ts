@@ -622,7 +622,7 @@ export class VibeSSHBot {
             `📝 Send me the modified command:\n\nCurrent: \`${session.pendingConfirmation.command}\``,
             { parse_mode: 'Markdown' }
           );
-          session.pendingConfirmation = undefined;
+          this.disarmPendingConfirmation(userId);
         }
         break;
 
@@ -1389,11 +1389,24 @@ export class VibeSSHBot {
     const session = this.sessions.getOrCreateSession(userId);
 
     if (session.pendingConfirmation) {
-      session.pendingConfirmation = undefined;
+      this.disarmPendingConfirmation(userId);
       await this.bot.sendMessage(chatId, '✅ Pending command cancelled');
     } else {
       await this.bot.sendMessage(chatId, '❌ No pending operations to cancel');
     }
+  }
+
+  /**
+   * Clears the pending confirmation AND removes its action from the registry,
+   * so the stale confirm button can no longer execute a cancelled command.
+   */
+  private disarmPendingConfirmation(userId: number) {
+    const session = this.sessions.getOrCreateSession(userId);
+    const actionId = session.pendingConfirmation?.actionId;
+    if (actionId) {
+      this.sessions.takeAction(actionId, userId);
+    }
+    session.pendingConfirmation = undefined;
   }
 
   private async transcribeVoice(fileUrl: string): Promise<string | null> {
