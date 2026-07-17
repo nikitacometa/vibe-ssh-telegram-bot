@@ -21,7 +21,7 @@ async function main() {
 
   // Create and start bot
   const bot = new VibeSSHBot();
-  
+
   try {
     await bot.start();
   } catch (error) {

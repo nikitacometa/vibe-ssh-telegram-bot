@@ -30,9 +30,7 @@ export class AICommandAnalyzer {
 
   /** Creates an analyzer, initializing OpenAI only when an API key is configured. */
   constructor() {
-    this.openai = config.openaiApiKey
-      ? new OpenAI({ apiKey: config.openaiApiKey })
-      : null;
+    this.openai = config.openaiApiKey ? new OpenAI({ apiKey: config.openaiApiKey }) : null;
   }
 
   /** Returns a validated command suggestion, or null when AI analysis is unavailable. */
@@ -58,10 +56,7 @@ Prefer safe, non-destructive commands and commonly available tools. Include usef
             content: userMessage
           }
         ],
-        response_format: zodResponseFormat(
-          CommandSuggestionSchema,
-          'command_suggestion'
-        ),
+        response_format: zodResponseFormat(CommandSuggestionSchema, 'command_suggestion'),
         temperature: 0.2,
         max_completion_tokens: 400
       });

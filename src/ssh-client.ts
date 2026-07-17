@@ -37,7 +37,7 @@ export class SimpleSSHClient {
         resolve({ hostKeyFingerprint: observedFingerprint });
       });
 
-      conn.on('error', (err) => {
+      conn.on('error', err => {
         logger.error(`SSH connection error: ${err.message}`);
         reject(err);
       });
@@ -64,7 +64,7 @@ export class SimpleSSHClient {
           if (config.hostKeyFingerprint && config.hostKeyFingerprint !== observedFingerprint) {
             logger.error(
               `Host key mismatch for ${config.host}: expected ${config.hostKeyFingerprint}, ` +
-              `got ${observedFingerprint}. Refusing to connect.`
+                `got ${observedFingerprint}. Refusing to connect.`
             );
             return false;
           }

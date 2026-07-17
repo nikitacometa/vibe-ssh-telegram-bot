@@ -38,7 +38,9 @@ export function loadServers(): ServerConfig[] {
   try {
     const configPath = fs.existsSync(config.serversConfigPath)
       ? config.serversConfigPath
-      : fs.existsSync(legacyPath) ? legacyPath : undefined;
+      : fs.existsSync(legacyPath)
+        ? legacyPath
+        : undefined;
 
     if (configPath) {
       const data = fs.readFileSync(configPath, 'utf-8');
@@ -55,13 +57,16 @@ export function loadServers(): ServerConfig[] {
     return userServers;
   }
 
-  return [{
-    id: 'default-ssh',
-    name: 'Default SSH Server',
-    type: 'ssh',
-    config: config.defaultSSHConfig,
-    enabled: true
-  }, ...userServers];
+  return [
+    {
+      id: 'default-ssh',
+      name: 'Default SSH Server',
+      type: 'ssh',
+      config: config.defaultSSHConfig,
+      enabled: true
+    },
+    ...userServers
+  ];
 }
 
 export function saveServers(servers: ServerConfig[]): void {
@@ -74,10 +79,6 @@ export function saveServers(servers: ServerConfig[]): void {
   // the env-derived default server (its secrets already live in .env)
   const persistable = servers.filter(s => s.id !== 'default-ssh');
 
-  fs.writeFileSync(
-    config.serversConfigPath,
-    JSON.stringify(persistable, null, 2),
-    { mode: 0o600 }
-  );
+  fs.writeFileSync(config.serversConfigPath, JSON.stringify(persistable, null, 2), { mode: 0o600 });
   fs.chmodSync(config.serversConfigPath, 0o600);
 }

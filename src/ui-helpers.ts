@@ -9,7 +9,7 @@ export class UIHelpers {
     const emojis = ['🎉', '🚀', '⚡', '🌟', '✨', '🎯', '🔥', '💫', '🎪', '🎭'];
     return emojis[Math.floor(Math.random() * emojis.length)];
   }
-  
+
   getTimeOfDayGreeting(): string {
     const hour = new Date().getHours();
     if (hour < 12) return '☀️ Good morning';
@@ -18,24 +18,29 @@ export class UIHelpers {
     return '🌃 Working late?';
   }
 
-  async sendWithTyping(bot: TelegramBot, chatId: number, message: string, options?: SendMessageOptions) {
+  async sendWithTyping(
+    bot: TelegramBot,
+    chatId: number,
+    message: string,
+    options?: SendMessageOptions
+  ) {
     // Send typing indicator
     await bot.sendChatAction(chatId, 'typing');
-    
+
     // Calculate typing time based on message length (50ms per character, max 3 seconds)
     const typingTime = Math.min(message.length * 50, 3000);
-    
+
     // Keep typing indicator active
     const typingInterval = setInterval(() => {
       bot.sendChatAction(chatId, 'typing').catch(() => {});
     }, 2000);
-    
+
     // Wait for "typing" effect
     await new Promise(resolve => setTimeout(resolve, typingTime));
-    
+
     // Clear typing indicator
     clearInterval(typingInterval);
-    
+
     // Send the message
     return bot.sendMessage(chatId, message, options);
   }
@@ -44,12 +49,12 @@ export class UIHelpers {
     // Limit output length and add formatting
     const lines = output.split('\n');
     const maxLines = 50;
-    
+
     if (lines.length > maxLines) {
       const truncated = lines.slice(0, maxLines).join('\n');
       return `\`\`\`\n${this.escapeForCodeBlock(truncated)}\n\`\`\`\n\n📄 _Output truncated (${lines.length - maxLines} more lines)_`;
     }
-    
+
     return `\`\`\`\n${this.escapeForCodeBlock(output)}\n\`\`\``;
   }
 
@@ -93,7 +98,7 @@ export class UIHelpers {
     const percentage = Math.round((progress / total) * 100);
     const filled = Math.round((progress / total) * 10);
     const empty = 10 - filled;
-    
+
     // Different styles based on progress
     if (percentage < 30) {
       return `🔴${'▓'.repeat(filled)}${'░'.repeat(empty)} ${percentage}% 🐌`;
@@ -129,25 +134,25 @@ export class UIHelpers {
       '🎬 Action! Running your scene...',
       '🏃‍♂️ Sprint mode activated!'
     ];
-    
+
     return messages[Math.floor(Math.random() * messages.length)];
   }
 
   getErrorMessage(error: unknown): string {
     const errorString = String(error);
-    const errorDetail =
-      error instanceof Error ? error.message : errorString;
+    const errorDetail = error instanceof Error ? error.message : errorString;
 
     const errorMessages: { [key: string]: string } = {
-      'ECONNREFUSED': '🔌 Oops! Connection refused. Is the server taking a nap? 😴',
-      'ETIMEDOUT': '⏱️ Connection timed out... The server is playing hard to get! 🙈',
-      'ENOTFOUND': '🔍 Server not found! Did it go on vacation? 🏖️',
+      ECONNREFUSED: '🔌 Oops! Connection refused. Is the server taking a nap? 😴',
+      ETIMEDOUT: '⏱️ Connection timed out... The server is playing hard to get! 🙈',
+      ENOTFOUND: '🔍 Server not found! Did it go on vacation? 🏖️',
       'Authentication failed': '🔐 Wrong password! The server said "You shall not pass!" 🧙‍♂️',
-      'Host verification failed': '🕵️ The server\'s host key changed since last time — possible MITM, connection refused! Remove the server and re-add it if the change is expected.',
-      'EHOSTUNREACH': '🌐 Can\'t reach the host. Check if your internet is having a bad day! 📡',
-      'ECONNRESET': '🔄 Connection reset! The server just rage-quit on us! 😤',
+      'Host verification failed':
+        "🕵️ The server's host key changed since last time — possible MITM, connection refused! Remove the server and re-add it if the change is expected.",
+      EHOSTUNREACH: "🌐 Can't reach the host. Check if your internet is having a bad day! 📡",
+      ECONNRESET: '🔄 Connection reset! The server just rage-quit on us! 😤',
       'Permission denied': '🚫 Permission denied! You need the secret handshake! 🤝',
-      'No such file': '📁 404: File not found. It\'s hiding really well! 🕵️‍♂️',
+      'No such file': "📁 404: File not found. It's hiding really well! 🕵️‍♂️",
       'Command not found': '🤷 Command not found. Did you make a typo? We all do! 😊'
     };
 
@@ -172,7 +177,7 @@ export class UIHelpers {
   createQuickCommands(): SendMessageOptions {
     const rows = [
       ['📁 Show Files', '💾 Check Space'],
-      ['🖥️ System Stats', '🏃‍♂️ What\'s Running?'],
+      ['🖥️ System Stats', "🏃‍♂️ What's Running?"],
       ['🌍 Network Check', '🧠 Memory Info'],
       ['⚙️ Settings', '🆘 Need Help?'],
       ['👋 Bye Server']
@@ -186,11 +191,15 @@ export class UIHelpers {
     };
   }
 
-  createServerKeyboard(servers: Array<{id: string, name: string, connected: boolean}>): InlineKeyboardMarkup {
-    const keyboard = servers.map(server => [{
-      text: `${server.connected ? '🟢' : '⚪'} ${server.name}`,
-      callback_data: server.connected ? `status_${server.id}` : `connect_${server.id}`
-    }]);
+  createServerKeyboard(
+    servers: Array<{ id: string; name: string; connected: boolean }>
+  ): InlineKeyboardMarkup {
+    const keyboard = servers.map(server => [
+      {
+        text: `${server.connected ? '🟢' : '⚪'} ${server.name}`,
+        callback_data: server.connected ? `status_${server.id}` : `connect_${server.id}`
+      }
+    ]);
 
     keyboard.push([
       { text: '➕ Add New Server', callback_data: 'add_server' },
@@ -205,7 +214,7 @@ export class UIHelpers {
     const statusText = isConnected ? 'Online & Ready!' : 'Sleeping...';
     const serverEmojis = ['🖥️', '💻', '🖲️', '⚡', '🔧'];
     const randomServerEmoji = serverEmojis[Math.floor(Math.random() * serverEmojis.length)];
-    
+
     return `
 ${randomServerEmoji} **${server.name}**
 ${statusEmoji} _${statusText}_
@@ -222,7 +231,7 @@ ${isConnected ? '\n⚡ _Ready for your commands!_' : '\n💤 _Click to wake up!_
     const greeting = userName ? `${userName}` : 'friend';
     const vibes = ['🌈', '🎉', '⚡', '✨', '🚀', '🌟', '💫', '🔥'];
     const randomVibe = vibes[Math.floor(Math.random() * vibes.length)];
-    
+
     return `
 ${randomVibe} **Yo ${greeting}! Welcome to VibeSSH!** ${randomVibe}
 
@@ -248,7 +257,7 @@ Let's make servers fun! 🌈
       ['▱▱▱', '▰▱▱', '▰▰▱', '▰▰▰', '▱▰▰', '▱▱▰', '▱▱▱'],
       ['🚀    ', ' 🚀   ', '  🚀  ', '   🚀 ', '    🚀', '   🚀 ', '  🚀  ', ' 🚀   ']
     ];
-    
+
     const animationSet = animations[Math.floor(stage / 10) % animations.length];
     return animationSet[stage % animationSet.length];
   }

@@ -56,7 +56,15 @@ export interface UserSession {
 }
 
 export interface ServerSetupState {
-  step: 'hostname' | 'name' | 'port' | 'username' | 'auth_method' | 'password' | 'private_key' | 'confirm';
+  step:
+    | 'hostname'
+    | 'name'
+    | 'port'
+    | 'username'
+    | 'auth_method'
+    | 'password'
+    | 'private_key'
+    | 'confirm';
   serverData: Partial<SSHConfig & { name: string; privateKey?: string }>;
 }
 
