@@ -1,3 +1,5 @@
+import type { ClientChannel } from 'ssh2';
+
 export interface ServerConfig {
   id: string;
   name: string;
@@ -67,8 +69,6 @@ export interface ServerSetupState {
     | 'confirm';
   serverData: Partial<SSHConfig & { name: string; privateKey?: string }>;
 }
-
-import type { ClientChannel } from 'ssh2';
 
 export interface ActiveCommand {
   messageId: number;
