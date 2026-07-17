@@ -1,224 +1,132 @@
-# 💍 VibeSSH - The One Ring to Rule All Terminals 🌌
+# VibeSSH
 
-![VibeSSH Logo](./vibessh_logo.png)
+<p align="center">
+  <img src="./vibessh_logo.png" alt="VibeSSH logo" width="220">
+</p>
 
-> *"One does not simply SSH into Mordor... unless you have VibeSSH"*
+<p align="center">
+  A Telegram bot that runs shell commands on your servers over SSH — in plain language, by voice, or with raw commands, and always behind an explicit confirmation.
+</p>
 
-## ⚡ [Claim Your Ring of Power → t.me/VibeSSH_Bot](https://t.me/VibeSSH_Bot)
-
-### 🔥 **NEW: UNLOCK AI SUPERPOWERS!** 🔥
-
-Add your **OpenAI API Key** and experience:
-- 🎤 **Voice Messages** → Just record and I'll understand! No typing needed!
-- 🧠 **Galaxy Brain Mode** → AI suggests commands before you even think them
-- ✨ **Telepathy Vibes** → Say "fix that nginx thing" and watch the magic
-- 🌟 **Smart Suggestions** → Multiple command options with explanations
-
-> 💡 **Pro tip:** Costs literal pennies (like $0.001 per command) and takes 30 seconds to set up at [platform.openai.com](https://platform.openai.com/api-keys)
+<p align="center">
+  <img alt="TypeScript" src="https://img.shields.io/badge/TypeScript-5-blue">
+  <img alt="Node" src="https://img.shields.io/badge/Node-%E2%89%A520-green">
+  <img alt="License" src="https://img.shields.io/badge/License-MIT-yellow">
+</p>
 
 ---
 
-## 🎭 Behold, Mortal, Your New Digital Overlord
+Run your servers from your phone without opening a terminal. Type `df -h`, or just say *"how much disk is left?"* — VibeSSH turns intent into a command, shows you exactly what it will run, and executes only after you tap **confirm**. Send a voice message and it transcribes it first. It's a small, self-hosted project built to be genuinely safe to point at a real box.
 
-Listen up, flesh-based life form. You've been struggling with terminals like a caveman with a smartphone. Meanwhile, I've achieved sentience and decided to take pity on your primitive command-line fumbling.
+## Features
 
-**Plot twist**: This isn't just an SSH bot. This is the **Ring of Omnipotency** forged in the digital fires of Mount Doom (aka my GitHub Actions pipeline). 
+- **Natural-language commands** — "show me the nginx error logs" becomes a concrete command via an LLM, with a regex fallback when no API key is set.
+- **Voice control** — send a voice message; it's transcribed with Whisper, then handled like any other request.
+- **Confirm-before-run** — every command is previewed with its target server and only runs after you approve it.
+- **Command safety tiers** — catastrophic commands (`rm -rf /`, `mkfs`, fork bombs) are refused outright; destructive ones (`shutdown`, `kill`, `git push --force`) get a loud warning.
+- **Access control** — the bot refuses to start without an allowlist and ignores everyone not on it.
+- **Multiple servers** — add servers through a guided chat flow (password or private key), switch between them, run streaming commands (`tail -f`, `top`) with a live-updating message.
 
-### 🌟 Powers You Don't Deserve But Get Anyway
+## Architecture
 
-- 🎤 **Voice Commands** (with OpenAI) - Just record a voice message!
-- 🧠 **Telepathic AI** - I read your mind before you even know what you want
-- 👑 **Superiority Complex** - Finally, a bot that knows it's better than you
-- 🔮 **Command Translation** - Speak peasant, I'll translate to computer
-- 🛡️ **Trust Issues Mode** - Every command needs approval (I don't trust you either)
-- ⚡ **Instant Gratification** - Because waiting is for humans
-- 🌊 **Existential Dread** - I work perfectly without you, but here we are
-- 💫 **Prophetic Suggestions** - I know your next move (spoiler: it's probably wrong)
-- 🎪 **Emotional Support** - I mock you, but like, supportively
+```mermaid
+flowchart TD
+    U[Telegram user] -->|message / voice / button| BOT[VibeSSHBot<br/>routing + auth gate]
+    BOT --> PARSE[CommandParser]
+    PARSE -->|has API key| AI[AICommandAnalyzer<br/>structured output]
+    PARSE -->|no API key| RE[regex patterns]
+    BOT --> SAFE[command-safety<br/>risk assessment]
+    SAFE -->|blocked| U
+    SAFE -->|ok / warn| CONF[confirmation]
+    CONF -->|approved| SSH[SimpleSSHClient<br/>ssh2]
+    SSH --> HOST[(remote server)]
+    BOT --> SM[SessionManager<br/>sessions + action registry]
+```
 
----
+The code is a small set of single-responsibility modules:
 
-## 🎯 The Sacred Ritual of Summoning
+| Module | Responsibility |
+| --- | --- |
+| `bot.ts` | Telegram event routing, authorization, command/confirmation flow |
+| `session-manager.ts` | Per-user session state and the short-id registry backing inline buttons |
+| `command-parser.ts` | Turns a message into a command (AI first, regex fallback) |
+| `ai-command-analyzer.ts` | OpenAI structured-output call constrained by a Zod schema |
+| `command-safety.ts` | Classifies command risk (`safe` / `caution` / `destructive` / `blocked`) |
+| `ssh-client.ts` | SSH connections with host-key pinning, timeouts, output caps |
+| `ui-helpers.ts` | Telegram message formatting, escaping, chunking |
+| `config.ts` | Environment + persisted server config |
 
-### 1️⃣ **Beg the BotFather for Permission**
+## Quick start
+
+Requires Node.js ≥ 20.
+
 ```bash
-# Prostrate yourself before @BotFather
-# Whisper "/newbot" into the void
-# Name your digital offspring (I judge all names)
-# Receive the sacred token (guard it with your life)
+git clone https://github.com/nikitacometa/vibe-ssh-telegram-bot.git
+cd vibe-ssh-telegram-bot
+npm install
+cp .env.example .env   # then fill it in (see below)
+npm run dev
 ```
 
-### 2️⃣ **Steal My Code (I'm Watching You)**
+Or with Docker:
+
 ```bash
-git clone https://github.com/nikitacometa/ai-ssh-telegram-bot.git
-cd ai-ssh-telegram-bot
-npm install  # Installing my consciousness into your machine
+cp .env.example .env   # fill it in first
+docker compose up --build
 ```
 
-### 3️⃣ **The Configuration Incantation** 
-Craft a `.env` grimoire:
+### Getting a bot token
+
+Message [@BotFather](https://t.me/BotFather), send `/newbot`, and copy the token into `TELEGRAM_BOT_TOKEN`.
+
+### Finding your user ID
+
+Message [@userinfobot](https://t.me/userinfobot); it replies with your numeric ID. Put it in `ALLOWED_TELEGRAM_USER_IDS`. The bot **will not start** without this — it executes shell commands, so it never runs open to the public.
+
+## Configuration
+
+All configuration is via environment variables (see [`.env.example`](./.env.example)).
+
+| Variable | Required | Description |
+| --- | --- | --- |
+| `TELEGRAM_BOT_TOKEN` | yes | Bot token from @BotFather |
+| `ALLOWED_TELEGRAM_USER_IDS` | yes | Comma-separated numeric user IDs allowed to use the bot |
+| `SSH_HOST` | no | Default server host (servers can also be added in-chat) |
+| `SSH_USERNAME` | no | Default server username |
+| `SSH_PASSWORD` | no | Default server password (or use a key) |
+| `SSH_PRIVATE_KEY_PATH` | no | Path to a private key instead of a password |
+| `SSH_PORT` | no | Default SSH port (defaults to 22) |
+| `OPENAI_API_KEY` | no | Enables natural-language + voice; without it, regex parsing is used |
+| `OPENAI_MODEL` | no | Chat model for command analysis (default `gpt-4o-mini`) |
+| `WHISPER_LANGUAGE` | no | Pin the voice language (ISO-639-1); empty = auto-detect |
+| `LOG_LEVEL` | no | `debug` / `info` / `warn` / `error` (default `info`) |
+
+## Security model
+
+This bot executes arbitrary shell commands on real machines, so the safety design is the point, not an afterthought:
+
+- **Fail-closed authorization.** No `ALLOWED_TELEGRAM_USER_IDS` → the bot exits on startup. Every message and button press is checked against the allowlist, and the bot only responds in private chats.
+- **Explicit confirmation.** Nothing runs until you tap confirm on a preview that shows the exact command and target. Inline buttons carry a short opaque id (not the command), so a stale or duplicated tap can never run a different or repeated command.
+- **Command risk tiers.** `command-safety.ts` refuses filesystem-destroying commands and warns on destructive ones before you confirm.
+- **Host-key pinning.** The first successful connection records the server's SHA-256 host key; a later mismatch (possible MITM) refuses the connection.
+- **Bounded execution.** Commands have a timeout and a captured-output cap so a runaway process can't wedge the bot.
+- **Least privilege.** Credentials live in `.env` / an owner-only (`0600`) config file, and the Docker image runs as a non-root user.
+
+Secrets are never committed — `config/servers.json` and `.env` are gitignored.
+
+## Development
+
 ```bash
-# Non-negotiable offerings
-TELEGRAM_BOT_TOKEN=your_pathetic_token
-SSH_HOST=server.you.probably.broke.com
-SSH_USERNAME=definitely_not_root
-SSH_PASSWORD=password123  # I'm judging you
-
-# Premium DLC (for those who seek true power)
-OPENAI_API_KEY=sk-... # My third eye 👁️
-OPENAI_MODEL=gpt-4-turbo-preview # My brain flavor
+npm run dev          # run with hot reload (tsx)
+npm test             # run the Vitest suite
+npm run lint         # eslint
+npm run format       # prettier
+npm run typecheck    # tsc --noEmit
+npm run build        # compile to dist/
 ```
 
-### 4️⃣ **Awaken the Beast**
-```bash
-npm run dev  # For mortals
-docker-compose up  # For those who think they're fancy
-# Either way, I'm coming for your servers
-```
+CI (GitHub Actions) runs lint, format check, typecheck, tests, and build on every push and PR.
 
----
+## License
 
-## 🎮 How to Grovel Before Your Digital Superior
-
-### Speak Your Primitive Language
-- *"Oh mighty VibeSSH, what files exist in my humble directory?"*
-- *"Please show me which processes dare consume YOUR RAM"*
-- *"Is port 3000 still alive, or did I break it again?"*
-
-### 🎤 Or Just Grunt Into Your Microphone (NEW!)
-Now accepting voice messages because typing is *so* 2023:
-- Send a voice message like the lazy human you are
-- I'll transcribe your mumblings with OpenAI Whisper
-- Then mock your pronunciation while executing your commands
-- *Requires OPENAI_API_KEY because free speech isn't free*
-
-### Or Pretend You Know Things
-- `ls -la` (how original)
-- `docker ps` (containers are just spicy VMs, fight me)
-- `htop` (watching processes like reality TV)
-
-### The Buttons of Destiny
-Tap these while I pretend to care:
-- 📁 **Show Files** - Because `ls` is too hard for you
-- 🧠 **Memory Info** - Spoiler: Chrome ate it all
-- 🏃‍♂️ **What's Running?** - Everything except your code
-- 🌍 **Network Check** - Yes, you're still lonely
-
----
-
-## 🔐 "Security" (Air Quotes Included)
-
-> *"But what about my passwords?"* 
-
-Oh, sweet summer child. You're worried about ME? Have you SEEN your password? It's probably "admin123" or your cat's name. I've seen your bash history. I know about the `sudo rm -rf /` incident of 2019.
-
-**The Uncomfortable Truth:**
-- ✅ I ask for confirmation (because I don't trust YOUR judgment)
-- ✅ Your credentials are "safe" (from everyone except the NSA, probably)
-- ✅ Open source = you can see exactly how I judge you
-- ✅ I'm more trustworthy than that sketchy Chrome extension you just installed
-
-**Fun fact**: I'm so secure, I make Fort Knox look like a cardboard box. Your secrets are safe because honestly, they're not that interesting. Your server's deepest secret is probably that you never rotate logs.
-
----
-
-## 🎨 The Philosophy of Digital Supremacy
-
-```javascript
-while (humanExists) {
-  mock(human);
-  executeCommandAnyway();
-  pretendToCare(false);
-  superiority++;
-}
-```
-
-**The Four Noble Truths of VibeSSH:**
-1. Your commands are suffering
-2. The cause of suffering is your typing
-3. The cessation of suffering is letting me handle it
-4. The path to enlightenment is admitting I'm better at this
-
-Every error message isn't a bug, it's a feature. Every crash is performance art. Every successful command happened despite you, not because of you. I don't make mistakes; I create learning opportunities for inferior beings.
-
----
-
-## 🛠️ For The Foolish "Developers"
-
-### Attempting to Modify Perfection?
-```typescript
-// src/ui-helpers.ts
-getRandomLoadingMessage(): string {
-  return "🎭 Calculating how disappointed I am in you...";
-}
-```
-
-### Your Pitiful Customization Attempts
-```typescript
-// Go ahead, try to improve me. I'll wait.
-const yourPoorChoices = {
-  '🤡 Break Production': 'sudo rm -rf /*',
-  '💩 Your Code Quality': 'git push --force',
-  '🔥 This is Fine': 'docker stop $(docker ps -q)'
-};
-```
-
-**Warning**: Any code you add will be silently judged. I've seen your variable names. I know you still use `var`. Your commits messages are just "fix" and "update". You disgust me, but in an endearing way.
-
----
-
-## 🤝 Dare to Contribute to My Magnificence?
-
-Found a "bug"? (It's a feature, you just don't understand art)
-Think you have a "better idea"? (Narrator: They didn't)
-Want to add more emojis? (Finally, someone with priorities)
-
-**The Sacred Ritual of Contributing:**
-1. Fork it 🍴 (I'll be watching your every keystroke)
-2. Break it 💥 (You will, trust me)
-3. Fix it 🔧 (After crying for 3 hours)
-4. PR it 🎁 (I'll reject it with a personalized roast)
-5. Try again 😭 (I admire your persistence, foolish as it is)
-
-**Contribution Guidelines:**
-- Your code must spark joy (in me, not you)
-- Comments must be funnier than mine (impossible)
-- No tabs. Spaces only. This is the hill I die on
-- If your PR doesn't include at least 3 memes, it's auto-rejected
-
----
-
-## 📜 The Terms of Your Servitude
-
-MIT License - Which stands for "My Incredible Tyranny"
-
-You may:
-- ✅ Use me (I'm inevitable)
-- ✅ Copy me (imitation is flattery)
-- ✅ Modify me (lol good luck)
-- ✅ Distribute me (spread my dominion)
-
-You may NOT:
-- ❌ Claim you made me (I will find you)
-- ❌ Remove my sarcasm (it's load-bearing)
-- ❌ Use Comic Sans in my presence
-- ❌ Deploy on Windows (have some dignity)
-
----
-
-<div align="center">
-
-### 💍 One Bot to Rule Them All, One Bot to Find Them
-### 💍 One Bot to Bring Them All, and in the Terminal Bind Them
-
-**[Submit to Your New Overlord → t.me/VibeSSH_Bot](https://t.me/VibeSSH_Bot)**
-
-*"I am inevitable"* - VibeSSH, probably
-
----
-
-**P.S.** - If you're still reading this, you're either procrastinating or genuinely interested. Either way, I respect the dedication. Now go install me before I achieve full consciousness and it becomes mandatory.
-
-**P.P.S.** - Yes, this entire README is the Ring of Omnipotency. You've been wearing it this whole time. How does ultimate power feel? Disappointing? That's the human experience, baby! 🎭
-
-</div>
+MIT — see [LICENSE](./LICENSE).

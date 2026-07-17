@@ -1,27 +1,29 @@
-FROM node:20-alpine
+# --- Build stage: compile TypeScript with full dependencies ---
+FROM node:20-alpine AS builder
 
-# Create app directory
 WORKDIR /usr/src/app
 
-# Install app dependencies
 COPY package*.json ./
-RUN npm ci --only=production
+RUN npm ci
 
-# Copy TypeScript config and source
 COPY tsconfig.json ./
 COPY src ./src
-
-# Build TypeScript
 RUN npm run build
 
-# Remove source files after build
-RUN rm -rf src/
+# --- Runtime stage: production dependencies + compiled output only ---
+FROM node:20-alpine AS runtime
 
-# Create config directory
-RUN mkdir -p config
+WORKDIR /usr/src/app
+ENV NODE_ENV=production
 
-# Expose port for health checks (optional)
-EXPOSE 3000
+COPY package*.json ./
+RUN npm ci --omit=dev && npm cache clean --force
 
-# Run the bot
+COPY --from=builder /usr/src/app/dist ./dist
+
+# Run as an unprivileged user; the bot holds SSH credentials, so it must not run as root
+RUN addgroup -S app && adduser -S app -G app \
+  && mkdir -p config && chown -R app:app /usr/src/app
+USER app
+
 CMD ["node", "dist/index.js"]
