@@ -2,6 +2,7 @@ import TelegramBot from 'node-telegram-bot-api';
 import { config, loadServers, saveServers } from './config';
 import { SimpleSSHClient } from './ssh-client';
 import { CommandParser } from './command-parser';
+import { assessCommandRisk } from './command-safety';
 import { UIHelpers } from './ui-helpers';
 import { UserSession, ServerConfig, CommandConfirmation, SSHConfig, ServerSetupState, ActiveCommand } from './types';
 
@@ -388,6 +389,19 @@ export class VibeSSHBot {
       session.activeServer = servers[0];
     }
 
+    // Safety gate: refuse catastrophic commands outright, warn about risky ones
+    const risk = assessCommandRisk(command);
+    if (risk.level === 'blocked') {
+      await this.bot.sendMessage(
+        chatId,
+        `🛑 **Command Blocked**\n\n` +
+        `\`${command}\`\n\n` +
+        `${risk.reason}. This bot refuses to run commands that can take down the whole system.`,
+        { parse_mode: 'Markdown' }
+      );
+      return;
+    }
+
     // Add to command history
     if (!session.commandHistory.includes(command)) {
       session.commandHistory.push(command);
@@ -420,14 +434,19 @@ export class VibeSSHBot {
     ];
     
     const randomMessage = confirmationMessages[Math.floor(Math.random() * confirmationMessages.length)];
-    
+
+    const riskWarning =
+      risk.level === 'destructive' ? `\n🚨 **Careful:** ${risk.reason}. Double-check before confirming!\n` :
+      risk.level === 'caution' ? `\n⚠️ **Note:** ${risk.reason}.\n` : '';
+
     await this.bot.sendMessage(
       chatId,
       `${randomMessage}\n\n` +
       `📍 **Target:** _${serverName}_\n` +
       `💻 **Command:** \`${command}\`\n` +
-      `⏰ **Time:** ${new Date().toLocaleTimeString()}\n\n` +
-      `_${this.getRandomCommandQuote()}_`,
+      `⏰ **Time:** ${new Date().toLocaleTimeString()}\n` +
+      riskWarning +
+      `\n_${this.getRandomCommandQuote()}_`,
       {
         parse_mode: 'Markdown',
         reply_markup: {
