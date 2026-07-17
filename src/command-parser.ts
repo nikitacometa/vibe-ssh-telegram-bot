@@ -62,7 +62,7 @@ export class CommandParser {
 
   private systemCommands = [
     '/start', '/help', '/servers', '/connect', '/disconnect', '/addserver',
-    '/removeserver', '/status', '/cancel'
+    '/removeserver', '/status', '/cancel', '/settings'
   ];
 
   async parse(message: string, useAI: boolean = true): Promise<ParsedCommand> {
@@ -130,18 +130,16 @@ export class CommandParser {
       return backtickMatch[1];
     }
 
-    // Look for explicit command patterns
-    const patterns = [
-      /(?:run|execute|exec)\s+(.+)/i,
-      /(?:please\s+)?(?:can you\s+)?(?:run|execute)\s+(.+)/i,
-      /^(ls|pwd|whoami|df|ps|top|free|uptime|date|uname)(?:\s|$)/i
-    ];
+    // "run <command>" style requests: the command is everything after the verb
+    const runMatch = message.match(/(?:please\s+)?(?:can you\s+)?(?:run|execute|exec)\s+(.+)/i);
+    if (runMatch) {
+      return runMatch[1];
+    }
 
-    for (const pattern of patterns) {
-      const match = message.match(pattern);
-      if (match) {
-        return match[1] || match[0];
-      }
+    // Message starts with a well-known command: treat the whole message as the
+    // command so arguments are preserved ("ls -la" must not degrade to "ls")
+    if (/^(ls|pwd|whoami|df|ps|top|free|uptime|date|uname)\b/i.test(message)) {
+      return message.trim();
     }
 
     return undefined;
