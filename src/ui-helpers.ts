@@ -1,8 +1,6 @@
 import TelegramBot from 'node-telegram-bot-api';
 
 export class UIHelpers {
-  private typingTimers: Map<number, NodeJS.Timeout> = new Map();
-  
   getRandomEmoji(): string {
     const emojis = ['🎉', '🚀', '⚡', '🌟', '✨', '🎯', '🔥', '💫', '🎪', '🎭'];
     return emojis[Math.floor(Math.random() * emojis.length)];

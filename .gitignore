@@ -9,5 +9,5 @@ dist/
 *.swp
 *.swo
 *~
-config/mcp-servers.json
+config/servers.json
 CLAUDE.md

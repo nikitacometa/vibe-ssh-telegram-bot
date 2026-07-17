@@ -1,4 +1,4 @@
-import { TelegramMCPBot } from './bot';
+import { VibeSSHBot } from './bot';
 import { config } from './config';
 
 async function main() {
@@ -11,7 +11,7 @@ async function main() {
   }
 
   // Create and start bot
-  const bot = new TelegramMCPBot();
+  const bot = new VibeSSHBot();
   
   try {
     await bot.start();

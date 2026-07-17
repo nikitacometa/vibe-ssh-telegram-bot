@@ -1,7 +1,7 @@
 import dotenv from 'dotenv';
 import fs from 'fs';
 import path from 'path';
-import { MCPServerConfig, SSHConfig } from './types';
+import { ServerConfig, SSHConfig } from './types';
 
 dotenv.config();
 
@@ -9,7 +9,7 @@ export const config = {
   telegramBotToken: process.env.TELEGRAM_BOT_TOKEN || '',
   openaiApiKey: process.env.OPENAI_API_KEY || '',
   openaiModelName: process.env.OPENAI_MODEL || 'gpt-4-turbo-preview',
-  mcpServersConfigPath: path.join(__dirname, '../config/mcp-servers.json'),
+  serversConfigPath: path.join(__dirname, '../config/servers.json'),
   defaultSSHConfig: {
     host: process.env.SSH_HOST || '',
     username: process.env.SSH_USERNAME || '',
@@ -19,16 +19,16 @@ export const config = {
   } as SSHConfig
 };
 
-export function loadMCPServers(): MCPServerConfig[] {
+export function loadServers(): ServerConfig[] {
   try {
-    if (fs.existsSync(config.mcpServersConfigPath)) {
-      const data = fs.readFileSync(config.mcpServersConfigPath, 'utf-8');
+    if (fs.existsSync(config.serversConfigPath)) {
+      const data = fs.readFileSync(config.serversConfigPath, 'utf-8');
       return JSON.parse(data);
     }
   } catch (error) {
-    console.error('Error loading MCP servers:', error);
+    console.error('Error loading server config:', error);
   }
-  
+
   // Return default SSH server if no config exists
   return [{
     id: 'default-ssh',
@@ -39,14 +39,14 @@ export function loadMCPServers(): MCPServerConfig[] {
   }];
 }
 
-export function saveMCPServers(servers: MCPServerConfig[]): void {
-  const dir = path.dirname(config.mcpServersConfigPath);
+export function saveServers(servers: ServerConfig[]): void {
+  const dir = path.dirname(config.serversConfigPath);
   if (!fs.existsSync(dir)) {
     fs.mkdirSync(dir, { recursive: true });
   }
-  
+
   fs.writeFileSync(
-    config.mcpServersConfigPath,
+    config.serversConfigPath,
     JSON.stringify(servers, null, 2)
   );
 }

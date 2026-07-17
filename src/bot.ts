@@ -1,28 +1,28 @@
 import TelegramBot from 'node-telegram-bot-api';
-import { config, loadMCPServers, saveMCPServers } from './config';
+import { config, loadServers, saveServers } from './config';
 import { SimpleSSHClient } from './ssh-client';
 import { CommandParser } from './command-parser';
 import { UIHelpers } from './ui-helpers';
-import { UserSession, MCPServerConfig, CommandConfirmation, SSHConfig, ServerSetupState, ActiveCommand } from './types';
+import { UserSession, ServerConfig, CommandConfirmation, SSHConfig, ServerSetupState, ActiveCommand } from './types';
 
-export class TelegramMCPBot {
+export class VibeSSHBot {
   private bot: TelegramBot;
   private sshClient: SimpleSSHClient;
   private commandParser: CommandParser;
   private uiHelpers: UIHelpers;
   private userSessions: Map<number, UserSession> = new Map();
-  private mcpServers: MCPServerConfig[] = [];
+  private servers: ServerConfig[] = [];
 
   constructor() {
     this.bot = new TelegramBot(config.telegramBotToken, { polling: true });
     this.sshClient = new SimpleSSHClient();
     this.commandParser = new CommandParser();
     this.uiHelpers = new UIHelpers();
-    this.mcpServers = loadMCPServers();
+    this.servers = loadServers();
   }
 
   async start() {
-    console.log('Starting Telegram MCP Bot...');
+    console.log('Starting VibeSSH bot...');
     
     // Initialize default server connection
     await this.initializeDefaultServer();
@@ -46,7 +46,7 @@ export class TelegramMCPBot {
   }
 
   private async initializeDefaultServer() {
-    const defaultServer = this.mcpServers.find(s => s.id === 'default-ssh');
+    const defaultServer = this.servers.find(s => s.id === 'default-ssh');
     if (defaultServer && defaultServer.enabled && defaultServer.config.host) {
       try {
         await this.sshClient.connect(defaultServer.id, defaultServer.config as SSHConfig);
@@ -390,7 +390,7 @@ export class TelegramMCPBot {
     
     session.pendingConfirmation = confirmation;
 
-    const serverName = this.mcpServers.find(s => s.id === session.activeServer)?.name || session.activeServer;
+    const serverName = this.servers.find(s => s.id === session.activeServer)?.name || session.activeServer;
 
     const confirmationMessages = [
       `🎯 **Ready to fire this command?**`,
@@ -533,7 +533,7 @@ export class TelegramMCPBot {
         break;
         
       case data === 'quick_connect':
-        const defaultServer = this.mcpServers.find(s => s.id === 'default-ssh');
+        const defaultServer = this.servers.find(s => s.id === 'default-ssh');
         if (defaultServer) {
           await this.connectToServer(chatId, userId, defaultServer.id);
         }
@@ -662,7 +662,7 @@ export class TelegramMCPBot {
     const statusMsg = await this.bot.sendMessage(
       chatId,
       `🔄 **Streaming Command Started**\n\n` +
-      `📍 Server: ${this.mcpServers.find(s => s.id === confirmation.serverId)?.name}\n` +
+      `📍 Server: ${this.servers.find(s => s.id === confirmation.serverId)?.name}\n` +
       `💻 Command: \`${confirmation.command}\`\n` +
       `⏰ Started: ${new Date().toLocaleTimeString()}\n\n` +
       `📜 **Live Output:**\n\`\`\`\nInitializing...\n\`\`\``,
@@ -704,7 +704,7 @@ export class TelegramMCPBot {
             
             this.bot.editMessageText(
               `🔄 **Streaming Command Running**\n\n` +
-              `📍 Server: ${this.mcpServers.find(s => s.id === confirmation.serverId)?.name}\n` +
+              `📍 Server: ${this.servers.find(s => s.id === confirmation.serverId)?.name}\n` +
               `💻 Command: \`${confirmation.command}\`\n` +
               `⏰ Runtime: ${runtime}s\n` +
               `📊 Updates: ${updateCount}\n\n` +
@@ -731,7 +731,7 @@ export class TelegramMCPBot {
           // Final update
           this.bot.editMessageText(
             `✅ **Streaming Command Completed**\n\n` +
-            `📍 Server: ${this.mcpServers.find(s => s.id === confirmation.serverId)?.name}\n` +
+            `📍 Server: ${this.servers.find(s => s.id === confirmation.serverId)?.name}\n` +
             `💻 Command: \`${confirmation.command}\`\n` +
             `⏰ Total runtime: ${runtime}s\n` +
             `🔢 Exit code: ${code}\n\n` +
@@ -853,7 +853,7 @@ export class TelegramMCPBot {
       await this.bot.sendMessage(
         chatId,
         `${randomSuccess}\n\n` +
-        `📍 **Server:** ${this.mcpServers.find(s => s.id === confirmation.serverId)?.name}\n` +
+        `📍 **Server:** ${this.servers.find(s => s.id === confirmation.serverId)?.name}\n` +
         `⏱️ **Speed:** ${(executionTime / 1000).toFixed(2)}s ${timeEmoji}\n\n` +
         `**Output:**\n${formattedOutput}`,
         {
@@ -935,8 +935,8 @@ export class TelegramMCPBot {
         );
         
         try {
-          const servers = this.mcpServers;
-          const defaultServer = servers.find((s: MCPServerConfig) => s.id === 'default-ssh');
+          const servers = this.servers;
+          const defaultServer = servers.find((s: ServerConfig) => s.id === 'default-ssh');
           
           if (defaultServer) {
             await this.connectToServer(chatId, Number(userId), defaultServer.id);
@@ -995,7 +995,7 @@ export class TelegramMCPBot {
     
     const connected = this.sshClient.getConnectedServers();
     
-    if (this.mcpServers.length === 0) {
+    if (this.servers.length === 0) {
       await this.uiHelpers.sendWithTyping(
         this.bot,
         chatId,
@@ -1014,16 +1014,16 @@ export class TelegramMCPBot {
       return;
     }
     
-    const serverList = this.mcpServers.map(server => ({
+    const serverList = this.servers.map(server => ({
       id: server.id,
       name: server.name,
       connected: connected.includes(server.id)
     }));
     
     let message = `📡 **Server Management**\n\n`;
-    message += `You have ${this.mcpServers.length} server${this.mcpServers.length > 1 ? 's' : ''} configured:\n\n`;
+    message += `You have ${this.servers.length} server${this.servers.length > 1 ? 's' : ''} configured:\n\n`;
     
-    for (const server of this.mcpServers) {
+    for (const server of this.servers) {
       const isConnected = connected.includes(server.id);
       message += this.uiHelpers.formatServerInfo(server, isConnected) + '\n\n';
     }
@@ -1040,7 +1040,7 @@ export class TelegramMCPBot {
       return;
     }
 
-    const server = this.mcpServers.find(
+    const server = this.servers.find(
       s => s.id === serverIdOrName || s.name.toLowerCase() === serverIdOrName.toLowerCase()
     );
 
@@ -1053,7 +1053,7 @@ export class TelegramMCPBot {
   }
 
   private async connectToServer(chatId: number, userId: number, serverId: string) {
-    const server = this.mcpServers.find(s => s.id === serverId);
+    const server = this.servers.find(s => s.id === serverId);
     if (!server) return;
 
     // Send connecting animation
@@ -1150,7 +1150,7 @@ export class TelegramMCPBot {
       return;
     }
 
-    const server = this.mcpServers.find(s => s.id === session.activeServer);
+    const server = this.servers.find(s => s.id === session.activeServer);
     const serverName = server?.name || session.activeServer;
 
     try {
@@ -1173,7 +1173,7 @@ export class TelegramMCPBot {
     } else {
       message += '*Connected Servers:*\n';
       for (const serverId of connected) {
-        const server = this.mcpServers.find(s => s.id === serverId);
+        const server = this.servers.find(s => s.id === serverId);
         const isActive = session.activeServer === serverId;
         message += `• ${server?.name || serverId} ${isActive ? '(Active)' : ''}\n`;
       }
@@ -1320,7 +1320,7 @@ export class TelegramMCPBot {
       `🎯 **Quick Commands**: ${session.preferences.quickCommands ? 'Enabled ✅' : 'Disabled ❌'}\n` +
       `📝 **Verbose Output**: ${session.preferences.verboseOutput ? 'Enabled ✅' : 'Disabled ❌'}\n` +
       `🤖 **AI Suggestions**: ${session.preferences.aiSuggestions ? 'Enabled ✅' : 'Disabled ❌'}\n\n` +
-      `Active Server: ${session.activeServer ? this.mcpServers.find(s => s.id === session.activeServer)?.name : 'None'}`,
+      `Active Server: ${session.activeServer ? this.servers.find(s => s.id === session.activeServer)?.name : 'None'}`,
       {
         parse_mode: 'Markdown',
         reply_markup: {
@@ -1357,25 +1357,8 @@ export class TelegramMCPBot {
     );
   }
 
-  private async handleAddServerStart(chatId: number, userId: number) {
-    await this.uiHelpers.sendWithTyping(
-      this.bot,
-      chatId,
-      `➕ **Add New Server**\n\n` +
-      `Let's set up a new SSH connection! I'll need some information:\n\n` +
-      `1️⃣ Server hostname or IP\n` +
-      `2️⃣ SSH port (usually 22)\n` +
-      `3️⃣ Username\n` +
-      `4️⃣ Authentication method\n\n` +
-      `First, please send me the **hostname or IP address** of your server:`,
-      { parse_mode: 'Markdown' }
-    );
-    
-    // TODO: Implement conversation flow for adding server
-  }
-
   private async handleServerStatus(chatId: number, serverId: string) {
-    const server = this.mcpServers.find(s => s.id === serverId);
+    const server = this.servers.find(s => s.id === serverId);
     if (!server) return;
     
     const isConnected = this.sshClient.isConnected(serverId);
@@ -1766,7 +1749,7 @@ export class TelegramMCPBot {
     
     try {
       // Create new server config
-      const newServer: MCPServerConfig = {
+      const newServer: ServerConfig = {
         id: `ssh-${Date.now()}`,
         name: data.name!,
         type: 'ssh',
@@ -1782,8 +1765,8 @@ export class TelegramMCPBot {
       };
       
       // Add to servers list
-      this.mcpServers.push(newServer);
-      saveMCPServers(this.mcpServers);
+      this.servers.push(newServer);
+      saveServers(this.servers);
       
       // Clear setup state
       session.serverSetup = undefined;

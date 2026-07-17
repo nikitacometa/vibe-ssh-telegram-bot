@@ -1,28 +1,9 @@
-version: '3.8'
-
 services:
-  mcp-telegram-bot:
+  vibe-ssh-bot:
     build: .
-    container_name: mcp-telegram-bot
+    container_name: vibe-ssh-bot
     restart: unless-stopped
     env_file:
       - .env
     volumes:
       - ./config:/usr/src/app/config
-      - ./logs:/usr/src/app/logs
-    networks:
-      - mcp-network
-    healthcheck:
-      test: ["CMD", "node", "-e", "process.exit(0)"]
-      interval: 30s
-      timeout: 10s
-      retries: 3
-      start_period: 40s
-
-networks:
-  mcp-network:
-    driver: bridge
-
-volumes:
-  config:
-  logs:
