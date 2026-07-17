@@ -3,30 +3,31 @@ import { config, loadServers, saveServers } from './config';
 import { SimpleSSHClient } from './ssh-client';
 import { CommandParser } from './command-parser';
 import { assessCommandRisk } from './command-safety';
+import { SessionManager } from './session-manager';
 import { UIHelpers } from './ui-helpers';
-import { UserSession, ServerConfig, CommandConfirmation, SSHConfig, PendingAction } from './types';
+import { logger } from './logger';
+import { ServerConfig, CommandConfirmation, SSHConfig, PendingAction } from './types';
 
 export class VibeSSHBot {
   private bot: TelegramBot;
   private sshClient: SimpleSSHClient;
   private commandParser: CommandParser;
   private uiHelpers: UIHelpers;
-  private userSessions: Map<number, UserSession> = new Map();
+  private sessions: SessionManager;
   private servers: ServerConfig[] = [];
-  private pendingActions: Map<string, PendingAction> = new Map();
-  private nextActionId = 1;
 
   constructor() {
     this.bot = new TelegramBot(config.telegramBotToken, { polling: true });
     this.sshClient = new SimpleSSHClient();
     this.commandParser = new CommandParser();
     this.uiHelpers = new UIHelpers();
+    this.sessions = new SessionManager();
     this.servers = loadServers();
   }
 
   async start() {
-    console.log('Starting VibeSSH bot...');
-    
+    logger.info('Starting VibeSSH bot...');
+
     // Initialize default server connection
     await this.initializeDefaultServer();
     
@@ -59,40 +60,6 @@ export class VibeSSHBot {
         console.error('Failed to connect to default server:', error);
       }
     }
-  }
-
-  /**
-   * Registers a command behind a short action id. Telegram limits
-   * callback_data to 64 bytes, so buttons never carry the command itself —
-   * the old base64-in-callback_data approach silently truncated commands.
-   */
-  private registerAction(userId: number, command: string, serverId: string): string {
-    const id = String(this.nextActionId++);
-    this.pendingActions.set(id, { userId, command, serverId, createdAt: Date.now() });
-
-    // Evict the oldest entries so the registry can't grow without bound
-    if (this.pendingActions.size > 200) {
-      const oldest = this.pendingActions.keys().next().value;
-      if (oldest) this.pendingActions.delete(oldest);
-    }
-    return id;
-  }
-
-  /** Looks up an action, enforcing that only its owner can use the button. */
-  private getAction(id: string, userId: number): PendingAction | undefined {
-    const action = this.pendingActions.get(id);
-    return action && action.userId === userId ? action : undefined;
-  }
-
-  /**
-   * Consumes a confirmation atomically: the entry is removed before any await,
-   * so a double-click or a stale button can never execute a command twice
-   * or execute a different command than the one shown.
-   */
-  private takeAction(id: string, userId: number): PendingAction | undefined {
-    const action = this.getAction(id, userId);
-    if (action) this.pendingActions.delete(id);
-    return action;
   }
 
   /**
@@ -180,7 +147,7 @@ export class VibeSSHBot {
   }
 
   private async handleMessage(chatId: number, userId: number, text: string, messageId?: number) {
-    let session = this.getOrCreateSession(userId);
+    let session = this.sessions.getOrCreateSession(userId);
     
     // Update last activity
     session.lastActivity = Date.now();
@@ -228,7 +195,7 @@ export class VibeSSHBot {
       return;
     }
     
-    session = this.getOrCreateSession(userId);
+    session = this.sessions.getOrCreateSession(userId);
     const parsed = await this.commandParser.parse(text, session.preferences.aiSuggestions);
 
     if (parsed.type === 'system') {
@@ -268,7 +235,7 @@ export class VibeSSHBot {
   }
 
   private async handleVoiceMessage(chatId: number, userId: number, voice: any, messageId?: number) {
-    const session = this.getOrCreateSession(userId);
+    const session = this.sessions.getOrCreateSession(userId);
     
     // Send initial processing message
     const processingMsg = await this.bot.sendMessage(
@@ -331,7 +298,7 @@ export class VibeSSHBot {
   }
 
   private async handleDocument(chatId: number, userId: number, document: any) {
-    const session = this.getOrCreateSession(userId);
+    const session = this.sessions.getOrCreateSession(userId);
     
     // Only handle documents during private key setup
     if (!session.serverSetup || session.serverSetup.step !== 'private_key') {
@@ -431,7 +398,7 @@ export class VibeSSHBot {
   }
 
   private async handleBashCommand(chatId: number, userId: number, command: string) {
-    const session = this.getOrCreateSession(userId);
+    const session = this.sessions.getOrCreateSession(userId);
     
     if (!session.activeServer) {
       const servers = this.sshClient.getConnectedServers();
@@ -485,7 +452,7 @@ export class VibeSSHBot {
       }
     }
 
-    const actionId = this.registerAction(userId, command, session.activeServer);
+    const actionId = this.sessions.registerAction(userId, command, session.activeServer);
 
     // Create confirmation request
     const confirmation: CommandConfirmation = {
@@ -562,7 +529,7 @@ export class VibeSSHBot {
   }
 
   private async handleCallbackQuery(chatId: number, userId: number, data: string, callbackId: string) {
-    const session = this.getOrCreateSession(userId);
+    const session = this.sessions.getOrCreateSession(userId);
 
     // Answer callback quickly to remove loading state
     await this.bot.answerCallbackQuery(callbackId, { text: '⏳ Processing...' });
@@ -570,7 +537,7 @@ export class VibeSSHBot {
     switch (true) {
       case data.startsWith('confirm:'): {
         const id = data.slice('confirm:'.length);
-        const action = this.takeAction(id, userId);
+        const action = this.sessions.takeAction(id, userId);
         if (!action) {
           await this.bot.sendMessage(chatId, '⌛ This confirmation has expired or was already handled.');
           break;
@@ -586,7 +553,7 @@ export class VibeSSHBot {
 
       case data.startsWith('cancel:'): {
         const id = data.slice('cancel:'.length);
-        const action = this.takeAction(id, userId);
+        const action = this.sessions.takeAction(id, userId);
         if (!action) {
           await this.bot.sendMessage(chatId, '⌛ This command was already handled or expired.');
           break;
@@ -601,7 +568,7 @@ export class VibeSSHBot {
       // A button that proposes a command (suggestion, history, retry):
       // it re-enters the normal confirmation flow, so it stays reusable
       case data.startsWith('run:'): {
-        const action = this.getAction(data.slice('run:'.length), userId);
+        const action = this.sessions.getAction(data.slice('run:'.length), userId);
         if (!action) {
           await this.bot.sendMessage(chatId, '⌛ This button has expired. Type the command instead.');
           break;
@@ -759,7 +726,7 @@ export class VibeSSHBot {
   }
 
   private async executeStreamingCommand(chatId: number, userId: number, confirmation: CommandConfirmation) {
-    const session = this.getOrCreateSession(userId);
+    const session = this.sessions.getOrCreateSession(userId);
     
     // Send initial message
     const statusMsg = await this.bot.sendMessage(
@@ -875,7 +842,7 @@ export class VibeSSHBot {
   }
 
   private async executeRegularCommand(chatId: number, userId: number, confirmation: CommandConfirmation) {
-    const session = this.getOrCreateSession(userId);
+    const session = this.sessions.getOrCreateSession(userId);
     
     // Send initial loading message with animation
     const loadingMsg = await this.bot.sendMessage(
@@ -945,13 +912,13 @@ export class VibeSSHBot {
 
       const suggestionButtons = nextSuggestions.map(cmd => ({
         text: `💫 ${cmd}`,
-        callback_data: `run:${this.registerAction(userId, cmd, confirmation.serverId)}`
+        callback_data: `run:${this.sessions.registerAction(userId, cmd, confirmation.serverId)}`
       }));
 
       const keyboard = [
         suggestionButtons,
         [
-          { text: '🔄 Again!', callback_data: `run:${this.registerAction(userId, confirmation.command, confirmation.serverId)}` },
+          { text: '🔄 Again!', callback_data: `run:${this.sessions.registerAction(userId, confirmation.command, confirmation.serverId)}` },
           { text: '📚 History', callback_data: 'show_history' }
         ],
         [{ text: '🏠 Home', callback_data: 'show_quick_commands' }]
@@ -999,7 +966,7 @@ export class VibeSSHBot {
           reply_markup: {
             inline_keyboard: [
               [
-                { text: '🔄 Retry', callback_data: `run:${this.registerAction(userId, confirmation.command, confirmation.serverId)}` },
+                { text: '🔄 Retry', callback_data: `run:${this.sessions.registerAction(userId, confirmation.command, confirmation.serverId)}` },
                 { text: '🔌 Reconnect', callback_data: `connect_${confirmation.serverId}` }
               ],
               [{ text: '❓ Get Help', callback_data: 'help' }]
@@ -1199,7 +1166,7 @@ export class VibeSSHBot {
     try {
       const result = await this.sshClient.connect(serverId, server.config as SSHConfig);
       this.pinHostKey(serverId, result.hostKeyFingerprint);
-      const session = this.getOrCreateSession(userId);
+      const session = this.sessions.getOrCreateSession(userId);
       session.activeServer = serverId;
 
       clearInterval(progressInterval);
@@ -1255,7 +1222,7 @@ export class VibeSSHBot {
   }
 
   private async handleDisconnectServer(chatId: number, userId: number, serverId: string) {
-    const session = this.getOrCreateSession(userId);
+    const session = this.sessions.getOrCreateSession(userId);
     const serverName = this.servers.find(s => s.id === serverId)?.name || serverId;
 
     try {
@@ -1289,7 +1256,7 @@ export class VibeSSHBot {
     }
 
     // Sessions pointing at the removed server must not keep executing on it
-    for (const session of this.userSessions.values()) {
+    for (const session of this.sessions.allSessions()) {
       if (session.activeServer === serverId) {
         session.activeServer = undefined;
       }
@@ -1307,7 +1274,7 @@ export class VibeSSHBot {
   }
 
   private async handleDisconnect(chatId: number, userId: number) {
-    const session = this.getOrCreateSession(userId);
+    const session = this.sessions.getOrCreateSession(userId);
     
     if (!session.activeServer) {
       await this.bot.sendMessage(chatId, '❌ No active server connection');
@@ -1327,7 +1294,7 @@ export class VibeSSHBot {
   }
 
   private async handleStatus(chatId: number, userId: number) {
-    const session = this.getOrCreateSession(userId);
+    const session = this.sessions.getOrCreateSession(userId);
     const connected = this.sshClient.getConnectedServers();
     
     let message = '*🔍 Connection Status:*\n\n';
@@ -1351,7 +1318,7 @@ export class VibeSSHBot {
   }
 
   private async handleCancel(chatId: number, userId: number) {
-    const session = this.getOrCreateSession(userId);
+    const session = this.sessions.getOrCreateSession(userId);
     
     if (session.pendingConfirmation) {
       session.pendingConfirmation = undefined;
@@ -1429,28 +1396,9 @@ export class VibeSSHBot {
     return [...new Set(suggestions)].slice(0, 3);
   }
 
-  private getOrCreateSession(userId: number): UserSession {
-    if (!this.userSessions.has(userId)) {
-      this.userSessions.set(userId, {
-        userId,
-        activeServer: undefined,
-        pendingConfirmation: undefined,
-        commandHistory: [],
-        lastActivity: Date.now(),
-        preferences: {
-          quickCommands: true,
-          verboseOutput: false,
-          aiSuggestions: true
-        },
-        serverSetup: undefined,
-        activeCommands: new Map()
-      });
-    }
-    return this.userSessions.get(userId)!;
-  }
 
   private async handleShowHistory(chatId: number, userId: number) {
-    const session = this.getOrCreateSession(userId);
+    const session = this.sessions.getOrCreateSession(userId);
     
     if (session.commandHistory.length === 0) {
       await this.bot.sendMessage(
@@ -1467,7 +1415,7 @@ export class VibeSSHBot {
     const serverId = session.activeServer || this.sshClient.getConnectedServers()[0] || 'default-ssh';
     const keyboard = session.commandHistory.slice(-5).map(cmd => [{
       text: `📜 ${cmd.substring(0, 30)}${cmd.length > 30 ? '...' : ''}`,
-      callback_data: `run:${this.registerAction(userId, cmd, serverId)}`
+      callback_data: `run:${this.sessions.registerAction(userId, cmd, serverId)}`
     }]);
 
     await this.bot.sendMessage(
@@ -1481,7 +1429,7 @@ export class VibeSSHBot {
   }
 
   private async handleSettings(chatId: number, userId: number) {
-    const session = this.getOrCreateSession(userId);
+    const session = this.sessions.getOrCreateSession(userId);
     
     await this.uiHelpers.sendWithTyping(
       this.bot,
@@ -1553,11 +1501,11 @@ export class VibeSSHBot {
   }
 
   private async showCommandSuggestions(chatId: number, userId: number, intent: string, suggestions: string[], explanation?: string, category?: string) {
-    const session = this.getOrCreateSession(userId);
+    const session = this.sessions.getOrCreateSession(userId);
     const serverId = session.activeServer || this.sshClient.getConnectedServers()[0] || 'default-ssh';
     const keyboard = suggestions.slice(0, 6).map(cmd => ([{
       text: `💻 ${cmd}`,
-      callback_data: `run:${this.registerAction(userId, cmd, serverId)}`
+      callback_data: `run:${this.sessions.registerAction(userId, cmd, serverId)}`
     }]));
     
     // Add manual input option
@@ -1592,7 +1540,7 @@ export class VibeSSHBot {
   }
 
   private async handleAddServer(chatId: number, userId: number) {
-    const session = this.getOrCreateSession(userId);
+    const session = this.sessions.getOrCreateSession(userId);
     
     session.serverSetup = {
       step: 'hostname',
@@ -1620,7 +1568,7 @@ export class VibeSSHBot {
   }
 
   private async handleServerSetupStep(chatId: number, userId: number, text: string, messageId?: number) {
-    const session = this.getOrCreateSession(userId);
+    const session = this.sessions.getOrCreateSession(userId);
     const setup = session.serverSetup!;
 
     switch (setup.step) {
@@ -1778,7 +1726,7 @@ export class VibeSSHBot {
   }
 
   private async handleServerSetupAction(chatId: number, userId: number, action: string) {
-    const session = this.getOrCreateSession(userId);
+    const session = this.sessions.getOrCreateSession(userId);
     const setup = session.serverSetup;
     
     if (!setup) return;
@@ -1861,7 +1809,7 @@ export class VibeSSHBot {
   }
 
   private async showServerConfirmation(chatId: number, userId: number) {
-    const session = this.getOrCreateSession(userId);
+    const session = this.sessions.getOrCreateSession(userId);
     const setup = session.serverSetup!;
     const data = setup.serverData;
     
@@ -1892,7 +1840,7 @@ export class VibeSSHBot {
   }
 
   private async saveNewServer(chatId: number, userId: number) {
-    const session = this.getOrCreateSession(userId);
+    const session = this.sessions.getOrCreateSession(userId);
     const setup = session.serverSetup!;
     const data = setup.serverData;
     
@@ -1952,7 +1900,7 @@ export class VibeSSHBot {
   }
 
   private async handleStopCommand(chatId: number, userId: number) {
-    const session = this.getOrCreateSession(userId);
+    const session = this.sessions.getOrCreateSession(userId);
     
     if (session.activeCommands.size === 0) {
       await this.bot.sendMessage(chatId, '❌ No active commands to stop.');
