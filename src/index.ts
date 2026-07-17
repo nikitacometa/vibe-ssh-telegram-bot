@@ -10,6 +10,15 @@ async function main() {
     process.exit(1);
   }
 
+  // Fail closed: a bot that executes shell commands must never run open to the public
+  if (config.allowedUserIds.length === 0) {
+    console.error('❌ ALLOWED_TELEGRAM_USER_IDS is not set in .env file');
+    console.log('This bot executes SSH commands, so access must be restricted.');
+    console.log('Set a comma-separated list of Telegram user IDs (get yours from @userinfobot):');
+    console.log('ALLOWED_TELEGRAM_USER_IDS=123456789');
+    process.exit(1);
+  }
+
   // Create and start bot
   const bot = new VibeSSHBot();
   

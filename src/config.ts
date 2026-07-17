@@ -5,8 +5,17 @@ import { ServerConfig, SSHConfig } from './types';
 
 dotenv.config();
 
+function parseAllowedUserIds(raw: string | undefined): number[] {
+  if (!raw) return [];
+  return raw
+    .split(',')
+    .map(part => Number(part.trim()))
+    .filter(id => Number.isInteger(id) && id > 0);
+}
+
 export const config = {
   telegramBotToken: process.env.TELEGRAM_BOT_TOKEN || '',
+  allowedUserIds: parseAllowedUserIds(process.env.ALLOWED_TELEGRAM_USER_IDS),
   openaiApiKey: process.env.OPENAI_API_KEY || '',
   openaiModelName: process.env.OPENAI_MODEL || 'gpt-4-turbo-preview',
   serversConfigPath: path.join(__dirname, '../config/servers.json'),
@@ -20,9 +29,16 @@ export const config = {
 };
 
 export function loadServers(): ServerConfig[] {
+  // Legacy path kept as a fallback for installs created before the rename
+  const legacyPath = path.join(path.dirname(config.serversConfigPath), 'mcp-servers.json');
+
   try {
-    if (fs.existsSync(config.serversConfigPath)) {
-      const data = fs.readFileSync(config.serversConfigPath, 'utf-8');
+    const configPath = fs.existsSync(config.serversConfigPath)
+      ? config.serversConfigPath
+      : fs.existsSync(legacyPath) ? legacyPath : undefined;
+
+    if (configPath) {
+      const data = fs.readFileSync(configPath, 'utf-8');
       return JSON.parse(data);
     }
   } catch (error) {

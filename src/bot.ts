@@ -57,11 +57,27 @@ export class VibeSSHBot {
     }
   }
 
+  /**
+   * Authorization gate: this bot executes shell commands on real servers,
+   * so every interaction is checked against the configured allowlist.
+   */
+  private isAuthorized(userId: number | undefined, chatType: string | undefined): boolean {
+    if (!userId) return false;
+    if (chatType && chatType !== 'private') return false;
+    return config.allowedUserIds.includes(userId);
+  }
+
   private setupHandlers() {
     this.bot.on('message', async (msg) => {
       const chatId = msg.chat.id;
       const userId = msg.from?.id || chatId;
       const text = msg.text || '';
+
+      if (!this.isAuthorized(msg.from?.id, msg.chat.type)) {
+        console.warn(`Rejected message from unauthorized user ${msg.from?.id} (chat ${chatId})`);
+        await this.bot.sendMessage(chatId, '🚫 You are not authorized to use this bot.').catch(() => {});
+        return;
+      }
 
       try {
         // Handle voice messages
@@ -86,6 +102,15 @@ export class VibeSSHBot {
       const data = callbackQuery.data;
 
       if (!chatId || !data) return;
+
+      if (!this.isAuthorized(userId, callbackQuery.message?.chat.type)) {
+        console.warn(`Rejected callback from unauthorized user ${userId} (chat ${chatId})`);
+        await this.bot.answerCallbackQuery(callbackQuery.id, {
+          text: 'You are not authorized to use this bot.',
+          show_alert: true
+        }).catch(() => {});
+        return;
+      }
 
       try {
         await this.handleCallbackQuery(chatId, userId, data, callbackQuery.id);
