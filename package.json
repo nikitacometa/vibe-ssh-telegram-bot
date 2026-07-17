@@ -1,37 +1,42 @@
 {
-  "name": "telegram-ssh-bot",
+  "name": "vibe-ssh-telegram-bot",
   "version": "1.0.0",
-  "description": "Interactive Telegram bot for secure SSH command execution with beautiful UI",
+  "description": "Telegram bot for SSH command execution with AI-powered natural language and voice control",
   "main": "dist/index.js",
   "scripts": {
     "build": "tsc",
     "start": "node dist/index.js",
-    "dev": "npm run build && npm run start",
-    "watch": "tsc -w",
-    "test": "echo \"Error: no test specified\" && exit 1"
+    "dev": "tsx watch src/index.ts",
+    "typecheck": "tsc --noEmit"
   },
   "keywords": [
     "telegram",
     "bot",
     "ssh",
-    "remote",
-    "command",
-    "execution",
-    "interactive"
+    "openai",
+    "whisper",
+    "natural-language",
+    "devops"
   ],
-  "author": "Your Name",
+  "author": "Nikita Gorokhov (https://github.com/nikitacometa)",
   "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/nikitacometa/vibe-ssh-telegram-bot.git"
+  },
+  "engines": {
+    "node": ">=20"
+  },
   "dependencies": {
-    "@modelcontextprotocol/sdk": "^1.12.0",
-    "@types/form-data": "^2.2.1",
-    "@types/node": "^22.15.23",
-    "@types/node-telegram-bot-api": "^0.64.8",
-    "@types/ssh2": "^1.15.5",
     "dotenv": "^16.5.0",
-    "form-data": "^4.0.2",
-    "node-telegram-bot-api": "^0.66.0",
-    "openai": "^4.103.0",
-    "ssh2": "^1.16.0",
+    "node-telegram-bot-api": "^1.2.0",
+    "openai": "^6.48.0",
+    "ssh2": "^1.16.0"
+  },
+  "devDependencies": {
+    "@types/node": "^22.15.23",
+    "@types/ssh2": "^1.15.5",
+    "tsx": "^4.19.0",
     "typescript": "^5.8.3"
   }
 }
