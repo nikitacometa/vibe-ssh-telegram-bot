@@ -1377,14 +1377,15 @@ export class VibeSSHBot {
       // Use toFile method to create a proper File object for OpenAI SDK
       const { toFile } = await import('openai');
       const file = await toFile(buffer, 'voice.ogg', { type: 'audio/ogg' });
-      
-      // Transcribe using Whisper
+
+      // Transcribe using Whisper. Language is auto-detected unless WHISPER_LANGUAGE
+      // pins it (a hint improves accuracy for a known-language deployment).
       const transcription = await openai.audio.transcriptions.create({
         file: file,
         model: 'whisper-1',
-        language: 'en' // You can make this configurable
+        ...(config.whisperLanguage ? { language: config.whisperLanguage } : {})
       });
-      
+
       return transcription.text.trim();
     } catch (error) {
       console.error('Transcription error:', error);

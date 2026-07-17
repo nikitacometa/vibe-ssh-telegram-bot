@@ -1,95 +1,78 @@
 import OpenAI from 'openai';
+import { zodResponseFormat } from 'openai/helpers/zod';
+import { z } from 'zod';
 import { config } from './config';
 
-export interface AICommandSuggestion {
-  commands: string[];
-  explanation: string;
-  confidence: number;
-  category: string;
-}
+const CommandSuggestionSchema = z.object({
+  commands: z.array(z.string()).min(1).max(4),
+  explanation: z.string(),
+  confidence: z.number().min(0).max(1),
+  category: z.enum([
+    'files',
+    'system',
+    'network',
+    'processes',
+    'text',
+    'logs',
+    'services',
+    'docker',
+    'git',
+    'packages'
+  ])
+});
 
+export type AICommandSuggestion = z.infer<typeof CommandSuggestionSchema>;
+
+/** Analyzes natural-language requests and suggests safe, practical shell commands. */
 export class AICommandAnalyzer {
-  private openai: OpenAI | null = null;
+  private readonly openai: OpenAI | null;
 
+  /** Creates an analyzer, initializing OpenAI only when an API key is configured. */
   constructor() {
-    if (config.openaiApiKey) {
-      this.openai = new OpenAI({
-        apiKey: config.openaiApiKey,
-      });
-    }
+    this.openai = config.openaiApiKey
+      ? new OpenAI({ apiKey: config.openaiApiKey })
+      : null;
   }
 
+  /** Returns a validated command suggestion, or null when AI analysis is unavailable. */
   async analyzeIntent(userMessage: string): Promise<AICommandSuggestion | null> {
     if (!this.openai) {
-      console.warn('OpenAI API key not configured, falling back to basic parsing');
       return null;
     }
 
     try {
-      const response = await this.openai.chat.completions.create({
+      const completion = await this.openai.chat.completions.parse({
         model: config.openaiModelName,
         messages: [
           {
             role: 'system',
-            content: `You are a Linux command expert. Analyze user requests and suggest appropriate bash commands.
+            content: `You are a Linux command expert. Convert the user's request into 1-4 practical shell commands, a concise explanation, a confidence score from 0 to 1, and exactly one category.
 
-Your task:
-1. Understand what the user wants to accomplish
-2. Suggest 2-4 relevant Linux/bash commands 
-3. Provide a brief explanation
-4. Rate your confidence (0.1-1.0)
-5. Categorize the request
+Categories: files, system, network, processes, text, logs, services, docker, git, packages.
 
-Categories: files, system, network, processes, text, logs, services, docker, git, packages
-
-Response format (JSON only):
-{
-  "commands": ["command1", "command2", "command3"],
-  "explanation": "Brief explanation of what these commands do",
-  "confidence": 0.8,
-  "category": "files"
-}
-
-Rules:
-- Always suggest practical, commonly used commands
-- Include command options/flags when helpful
-- For file operations, use generic filenames unless specific names mentioned
-- Prioritize safer commands (avoid rm -rf unless clearly requested)
-- If user mentions specific filenames, incorporate them
-- For system info: prefer commands like df -h, free -h, ps aux, top
-- For network: netstat, ss, ping, curl, wget
-- Keep commands concise and practical`
+Prefer safe, non-destructive commands and commonly available tools. Include useful flags when appropriate. Incorporate specific filenames, paths, services, hosts, or other concrete details from the request. Keep commands concise and directly usable.`
           },
           {
             role: 'user',
             content: userMessage
           }
         ],
-        max_tokens: 300,
-        temperature: 0.3
+        response_format: zodResponseFormat(
+          CommandSuggestionSchema,
+          'command_suggestion'
+        ),
+        temperature: 0.2,
+        max_completion_tokens: 400
       });
 
-      const content = response.choices[0]?.message?.content;
-      if (!content) return null;
-
-      // Parse the JSON response
-      const suggestion = JSON.parse(content) as AICommandSuggestion;
-      
-      // Validate the response
-      if (!suggestion.commands || !Array.isArray(suggestion.commands) || suggestion.commands.length === 0) {
-        return null;
-      }
-
-      // Ensure confidence is within bounds
-      suggestion.confidence = Math.max(0.1, Math.min(1.0, suggestion.confidence || 0.5));
-
-      return suggestion;
-    } catch (error) {
-      console.error('OpenAI API error:', error);
+      return completion.choices[0]?.message.parsed ?? null;
+    } catch (error: unknown) {
+      console.error('OpenAI command analysis failed; falling back to regex parsing:', error);
       return null;
     }
   }
 
+  /** Reports whether an OpenAI client is configured and ready for requests. */
   isAvailable(): boolean {
     return this.openai !== null;
   }

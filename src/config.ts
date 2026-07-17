@@ -17,7 +17,8 @@ export const config = {
   telegramBotToken: process.env.TELEGRAM_BOT_TOKEN || '',
   allowedUserIds: parseAllowedUserIds(process.env.ALLOWED_TELEGRAM_USER_IDS),
   openaiApiKey: process.env.OPENAI_API_KEY || '',
-  openaiModelName: process.env.OPENAI_MODEL || 'gpt-4-turbo-preview',
+  openaiModelName: process.env.OPENAI_MODEL || 'gpt-4o-mini',
+  whisperLanguage: process.env.WHISPER_LANGUAGE || '',
   serversConfigPath: path.join(__dirname, '../config/servers.json'),
   defaultSSHConfig: {
     host: process.env.SSH_HOST || '',

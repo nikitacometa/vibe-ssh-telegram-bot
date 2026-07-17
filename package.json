@@ -31,7 +31,8 @@
     "dotenv": "^16.5.0",
     "node-telegram-bot-api": "^1.2.0",
     "openai": "^6.48.0",
-    "ssh2": "^1.16.0"
+    "ssh2": "^1.16.0",
+    "zod": "^3.25.76"
   },
   "devDependencies": {
     "@types/node": "^22.15.23",
